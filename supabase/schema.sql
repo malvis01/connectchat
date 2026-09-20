@@ -456,7 +456,8 @@ create policy direct_conversations_select_member
 on public.direct_conversations for select
 to authenticated
 using (auth.uid() in (user_one, user_two));
-\n
+
+
 -- Private ConnectChat media bucket. Apply only to the dedicated ConnectChat Supabase project.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
