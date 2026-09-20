@@ -26,6 +26,7 @@ export default function ChatPage() {
   const [error, setError] = useState("");
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [otherOnline, setOtherOnline] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -36,7 +37,13 @@ export default function ChatPage() {
         return;
       }
       const { data: me } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
-      if (mounted && me) setProfile(me);
+      if (mounted && me) {
+        setProfile(me);
+        await supabase.from("profiles").update({
+          is_online: true,
+          last_seen_at: new Date().toISOString(),
+        }).eq("id", user.id);
+      }
       const { data: users } = await supabase
         .from("profiles")
         .select("*")
@@ -46,6 +53,30 @@ export default function ChatPage() {
     })();
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (!profile) return;
+    const markOffline = () => {
+      void supabase.from("profiles").update({
+        is_online: false,
+        last_seen_at: new Date().toISOString(),
+      }).eq("id", profile.id);
+    };
+    const markOnline = () => {
+      void supabase.from("profiles").update({
+        is_online: true,
+        last_seen_at: new Date().toISOString(),
+      }).eq("id", profile.id);
+    };
+    const onVisibility = () => document.visibilityState === "visible" ? markOnline() : markOffline();
+    window.addEventListener("beforeunload", markOffline);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("beforeunload", markOffline);
+      document.removeEventListener("visibilitychange", onVisibility);
+      markOffline();
+    };
+  }, [profile]);
 
   useEffect(() => {
     return () => {
@@ -108,8 +139,7 @@ export default function ChatPage() {
         })
         .on("presence", { event: "sync" }, () => {
           const state = channel.presenceState();
-          const otherPresent = Boolean(state[person.id]?.length);
-          setTyping(otherPresent && typing);
+          setOtherOnline(Boolean(state[person.id]?.length));
         })
         .subscribe(async (status) => {
           if (status === "SUBSCRIBED") {
@@ -180,7 +210,7 @@ export default function ChatPage() {
             <button key={person.id} className={`person-row ${selected?.id === person.id ? "active" : ""}`} onClick={() => void openChat(person)}>
               <span className="person-avatar">{person.full_name.slice(0,1).toUpperCase()}</span>
               <span className="person-info"><strong>{person.full_name}</strong><small>{person.username ? `@${person.username}` : person.phone}</small></span>
-              <span className={`presence ${person.is_online ? "online" : ""}`}/>
+              <span className={`presence ${person.id === selected?.id ? (otherOnline ? "online" : "") : (person.is_online ? "online" : "")}`}/>
             </button>
           ))}
           {!filteredPeople.length && <p className="empty-state">No other users yet.</p>}
@@ -198,7 +228,7 @@ export default function ChatPage() {
           <>
             <header className="chat-header">
               <span className="person-avatar">{selected.full_name.slice(0,1).toUpperCase()}</span>
-              <div><strong>{selected.full_name}</strong><small>{typing ? "typing…" : selected.is_online ? "online" : "offline"}</small></div>
+              <div><strong>{selected.full_name}</strong><small>{typing ? "typing…" : otherOnline || selected.is_online ? "online" : "offline"}</small></div>
             </header>
 
             <div className="message-list">
