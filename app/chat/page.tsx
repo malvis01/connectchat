@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Play, Search, Send, Smile, Square, Sticker, UserRound, X } from "lucide-react";
+import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Phone, Play, Search, Send, Smile, Square, Sticker, UserRound, Video, X } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
 
@@ -96,7 +96,7 @@ export default function ChatPage() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recorderStreamRef = useRef<MediaStream | null>(null);
   const recordTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [otherOnline, setOtherOnline] = useState(false);
+  const [otherOnline, setOtherOnline] = useState(false);\n  const [call,setCall]=useState<{id:string;type:"voice"|"video";incoming:boolean;status:string}|null>(null);\n  const [callSeconds,setCallSeconds]=useState(0);\n  const [callMuted,setCallMuted]=useState(false);\n  const [cameraOff,setCameraOff]=useState(false);\n  const [localStream,setLocalStream]=useState<MediaStream|null>(null);\n  const [remoteStream,setRemoteStream]=useState<MediaStream|null>(null);\n  const peerRef=useRef<RTCPeerConnection|null>(null);\n  const callChannelRef=useRef<ReturnType<typeof supabase.channel>|null>(null);\n  const callTimerRef=useRef<ReturnType<typeof setInterval>|null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -189,6 +189,55 @@ export default function ChatPage() {
     });
     if (sendError) setError(sendError.message);
     setShowStickers(false);
+  }
+
+  async function endCall(status:"ended"|"declined"|"missed"|"failed"="ended"){
+    if(!call)return;
+    await supabase.from("calls").update({status,ended_at:new Date().toISOString()}).eq("id",call.id);
+    peerRef.current?.close(); peerRef.current=null;
+    localStream?.getTracks().forEach(t=>t.stop()); setLocalStream(null); setRemoteStream(null); setCall(null); setCallSeconds(0);
+    if(callChannelRef.current){await supabase.removeChannel(callChannelRef.current);callChannelRef.current=null;}
+    if(callTimerRef.current){clearInterval(callTimerRef.current);callTimerRef.current=null;}
+  }
+
+  async function startCall(type:"voice"|"video"){
+    if(!conversationId||!profile||!selected||call)return;
+    try{
+      const media=await navigator.mediaDevices.getUserMedia({audio:true,video:type==="video"});
+      const {data,rowError}=await supabase.from("calls").insert({conversation_id:conversationId,initiated_by:profile.id,call_type:type,status:"ringing"}).select("id").single();
+      if(rowError||!data)throw rowError??new Error("Could not create call.");
+      await supabase.from("call_participants").insert({call_id:data.id,user_id:profile.id,joined_at:new Date().toISOString()});
+      const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+      media.getTracks().forEach(t=>pc.addTrack(t,media)); pc.ontrack=e=>setRemoteStream(e.streams[0]??null);
+      const ch=supabase.channel("call:"+data.id);
+      ch.on("broadcast",{event:"signal"},async({payload})=>{
+        if(payload?.from===profile.id)return;
+        if(payload.type==="answer")await pc.setRemoteDescription(payload.answer);
+        if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
+        if(payload.type==="decline"||payload.type==="hangup")await endCall(payload.type==="decline"?"declined":"ended");
+      }).subscribe(async status=>{if(status==="SUBSCRIBED"){const offer=await pc.createOffer();await pc.setLocalDescription(offer);await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"offer",offer}});}});
+      pc.onicecandidate=e=>{if(e.candidate)void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ice",candidate:e.candidate}})};
+      setLocalStream(media);setCall({id:data.id,type,incoming:false,status:"ringing"});callChannelRef.current=ch;peerRef.current=pc;
+    }catch(e){setError(e instanceof Error?e.message:"Could not start call.");}
+  }
+
+  async function acceptCall(callId:string,type:"voice"|"video"){
+    if(!profile)return;
+    try{
+      const media=await navigator.mediaDevices.getUserMedia({audio:true,video:type==="video"});
+      const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+      media.getTracks().forEach(t=>pc.addTrack(t,media)); pc.ontrack=e=>setRemoteStream(e.streams[0]??null);
+      const ch=supabase.channel("call:"+callId);
+      ch.on("broadcast",{event:"signal"},async({payload})=>{
+        if(payload?.from===profile.id)return;
+        if(payload.type==="offer"){await pc.setRemoteDescription(payload.offer);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"answer",answer}});await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",callId);}
+        if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
+        if(payload.type==="hangup")await endCall("ended");
+      }).subscribe();
+      pc.onicecandidate=e=>{if(e.candidate)void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ice",candidate:e.candidate}})};
+      await supabase.from("call_participants").upsert({call_id:callId,user_id:profile.id,joined_at:new Date().toISOString()});
+      setLocalStream(media);setCall(c=>c?{...c,status:"active"}:c);callChannelRef.current=ch;peerRef.current=pc;
+    }catch(e){setError(e instanceof Error?e.message:"Could not accept call.");}
   }
 
   async function openChat(person: Profile) {
@@ -350,7 +399,7 @@ export default function ChatPage() {
       </aside>
       <section className="chat-panel">
         {!selected ? <div className="chat-empty"><MessageCircle size={42}/><h1>Start a private conversation</h1><p>Choose a person from the left to begin messaging in real time.</p></div> : <>
-          <header className="chat-header"><span className="person-avatar">{selected.full_name.slice(0,1).toUpperCase()}</span><div><strong>{selected.full_name}</strong><small>{typing ? "typing…" : otherOnline || selected.is_online ? "online" : "offline"}</small></div></header>
+          <header className="chat-header"><span className="person-avatar">{selected.full_name.slice(0,1).toUpperCase()}</span><div><strong>{selected.full_name}</strong><small>{typing ? "typing…" : otherOnline || selected.is_online ? "online" : "offline"}</small></div><div className="chat-call-actions"><button onClick={()=>void startCall("voice")} title="Voice call"><Phone size={18}/></button><button onClick={()=>void startCall("video")} title="Video call"><Video size={18}/></button></div></header>
           <div className="message-list">
             {messages.map((message) => {
               const mine = message.sender_id === profile?.id;
@@ -379,7 +428,7 @@ export default function ChatPage() {
             </div>
           </div>
         </>}
-        {error && <div className="chat-error">{error}<button onClick={() => setError("")}><X size={14}/></button></div>}
+        {call&&<div className="call-overlay"><div className="call-card"><div className="call-title">{call.incoming?"Incoming":call.status==="ringing"?"Calling":"Call"} {call.type}</div><div className="call-person"><span className="person-avatar">{selected?.full_name.slice(0,1).toUpperCase()??"?"}</span><strong>{selected?.full_name??"ConnectChat user"}</strong><small>{call.status==="ringing"?"Ringing…":Math.floor(callSeconds/60)+":"+String(callSeconds%60).padStart(2,"0")}</small></div>{call.type==="video"&&<div className="video-stage">{remoteStream?<video autoPlay playsInline ref={n=>{if(n)n.srcObject=remoteStream}} className="remote-video"/>:<div className="video-wait">Waiting for camera…</div>}{localStream&&<video autoPlay muted playsInline ref={n=>{if(n)n.srcObject=localStream}} className="local-video"/>}</div>}<div className="call-controls">{call.incoming&&call.status==="ringing"?<><button className="call-action accept" onClick={()=>void acceptCall(call.id,call.type)}>Accept</button><button className="call-action decline" onClick={()=>void endCall("declined")}>Decline</button></>:<><button className="call-action" onClick={()=>setCallMuted(v=>!v)}>{callMuted?"Unmute":"Mute"}</button>{call.type==="video"&&<button className="call-action" onClick={()=>setCameraOff(v=>!v)}>{cameraOff?"Camera on":"Camera off"}</button>}<button className="call-action decline" onClick={()=>void endCall()}>End call</button></>}</div></div></div>}\n        {error && <div className="chat-error">{error}<button onClick={() => setError("")}><X size={14}/></button></div>}
       </section>
     </main>
   );
