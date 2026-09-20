@@ -580,3 +580,18 @@ drop policy if exists call_participants_update_self on public.call_participants;
 create policy call_participants_update_self on public.call_participants for update to authenticated
 using (user_id = (select auth.uid()))
 with check (user_id = (select auth.uid()));
+
+-- Realtime is required for live chat and call signaling metadata.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['messages','calls','call_participants'] loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
