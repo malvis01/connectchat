@@ -24,6 +24,7 @@ export default function AuthPage() {
     if (/^0\d{10}$/.test(normalizedPhone)) {
       normalizedPhone = "+234" + normalizedPhone.slice(1);
     }
+
     const normalizedUsername = username.trim().replace(/^@+/, "").toLowerCase();
 
     if (!/^\+[1-9]\d{7,14}$/.test(normalizedPhone)) {
@@ -55,59 +56,41 @@ export default function AuthPage() {
 
     try {
       if (mode === "signup") {
-      const { data, error } = await supabase.auth.signUp({
-        phone: normalizedPhone,
-        password,
-        options: {
-          data: {
-            full_name: fullName.trim(),
-            username: normalizedUsername || null,
+        const { data, error } = await supabase.auth.signUp({
+          phone: normalizedPhone,
+          password,
+          options: {
+            data: {
+              full_name: fullName.trim(),
+              username: normalizedUsername || null,
+            },
           },
-        },
-      });
+        });
 
-      if (error) {
-        setMessage(error.message);
-        setBusy(false);
+        if (error) {
+          setMessage(error.message);
+          return;
+        }
+
+        if (!data.user || !data.session) {
+          setMessage("Account creation needs phone confirmation to be disabled in the ConnectChat Supabase project. No SMS/OTP is used in V1.");
+          return;
+        }
+
+        const { error: profileError } = await supabase.from("profiles").upsert({
+          id: data.user.id,
+          phone: normalizedPhone,
+          full_name: fullName.trim(),
+          username: normalizedUsername || null,
+        });
+
+        if (profileError) {
+          setMessage(profileError.message);
+          return;
+        }
+
+        window.location.href = "/chat";
         return;
-      }
-
-      if (!data.user || !data.session) {
-        setMessage("Account created, but phone confirmation is enabled. ConnectChat V1 requires phone confirmation to be disabled so no SMS/OTP is used.");
-        setBusy(false);
-        return;
-      }
-
-      const { error: profileError } = await supabase.from("profiles").upsert({
-        id: data.user.id,
-        phone: normalizedPhone,
-        full_name: fullName.trim(),
-        username: normalizedUsername || null,
-      });
-
-      if (profileError) {
-        setMessage(profileError.message);
-        setBusy(false);
-        return;
-      }
-
-      window.location.href = "/chat";
-      return;
-    }
-
-    const { error } = await supabase.auth.signInWithPassword({
-      phone: normalizedPhone,
-      password,
-    });
-
-    if (error) {
-      setMessage(error.message);
-      setBusy(false);
-      return;
-    }
-
-      window.location.href = "/chat";
-      return;
       }
 
       const { error } = await supabase.auth.signInWithPassword({
