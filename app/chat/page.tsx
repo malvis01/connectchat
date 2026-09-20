@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, Search, Send, UserRound } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
@@ -22,31 +22,36 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
+  const [typing, setTyping] = useState(false);
   const [error, setError] = useState("");
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let mounted = true;
-
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         window.location.href = "/auth";
         return;
       }
-
       const { data: me } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
       if (mounted && me) setProfile(me);
-
       const { data: users } = await supabase
         .from("profiles")
         .select("*")
         .neq("id", user.id)
         .order("full_name");
-
       if (mounted) setPeople(users ?? []);
     })();
-
     return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (channelRef.current) void supabase.removeChannel(channelRef.current);
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+    };
   }, []);
 
   const filteredPeople = useMemo(() => {
@@ -61,7 +66,14 @@ export default function ChatPage() {
 
   async function openChat(person: Profile) {
     setSelected(person);
+    setMessages([]);
+    setTyping(false);
     setError("");
+    if (channelRef.current) {
+      await supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
     try {
       const id = await getOrCreateDirectConversation(supabase, person.id);
       setConversationId(id);
@@ -72,16 +84,16 @@ export default function ChatPage() {
         .eq("conversation_id", id)
         .is("deleted_at", null)
         .order("created_at", { ascending: true });
-
       if (readError) throw readError;
       setMessages(data ?? []);
 
-      await supabase
-        .channel(`chat:${id}`)
+      const channel = supabase.channel(`chat:${id}`, {
+        config: { presence: { key: profile?.id ?? "anonymous" } },
+      });
+
+      channel
         .on("postgres_changes", {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
+          event: "INSERT", schema: "public", table: "messages",
           filter: `conversation_id=eq.${id}`,
         }, (payload) => {
           const message = payload.new as Message;
@@ -89,9 +101,43 @@ export default function ChatPage() {
             current.some((item) => item.id === message.id) ? current : [...current, message],
           );
         })
-        .subscribe();
+        .on("broadcast", { event: "typing" }, ({ payload }) => {
+          if (payload?.userId === person.id) {
+            setTyping(Boolean(payload.isTyping));
+          }
+        })
+        .on("presence", { event: "sync" }, () => {
+          const state = channel.presenceState();
+          const otherPresent = Boolean(state[person.id]?.length);
+          setTyping(otherPresent && typing);
+        })
+        .subscribe(async (status) => {
+          if (status === "SUBSCRIBED") {
+            await channel.track({ userId: profile?.id, onlineAt: new Date().toISOString() });
+          }
+        });
+
+      channelRef.current = channel;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not open conversation.");
+    }
+  }
+
+  async function broadcastTyping(isTyping: boolean) {
+    if (!channelRef.current || !profile) return;
+    await channelRef.current.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { userId: profile.id, isTyping },
+    });
+  }
+
+  function handleDraftChange(value: string) {
+    setDraft(value);
+    void broadcastTyping(Boolean(value.trim()));
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    if (value.trim()) {
+      typingTimer.current = setTimeout(() => void broadcastTyping(false), 1200);
     }
   }
 
@@ -99,6 +145,7 @@ export default function ChatPage() {
     if (!conversationId || !profile || !draft.trim()) return;
     const body = draft.trim();
     setDraft("");
+    void broadcastTyping(false);
 
     const { error: sendError } = await supabase.from("messages").insert({
       conversation_id: conversationId,
@@ -106,7 +153,6 @@ export default function ChatPage() {
       body,
       message_type: "text",
     });
-
     if (sendError) {
       setDraft(body);
       setError(sendError.message);
@@ -131,7 +177,7 @@ export default function ChatPage() {
 
         <div className="people-list">
           {filteredPeople.map((person) => (
-            <button key={person.id} className={`person-row ${selected?.id === person.id ? "active" : ""}`} onClick={() => openChat(person)}>
+            <button key={person.id} className={`person-row ${selected?.id === person.id ? "active" : ""}`} onClick={() => void openChat(person)}>
               <span className="person-avatar">{person.full_name.slice(0,1).toUpperCase()}</span>
               <span className="person-info"><strong>{person.full_name}</strong><small>{person.username ? `@${person.username}` : person.phone}</small></span>
               <span className={`presence ${person.is_online ? "online" : ""}`}/>
@@ -152,7 +198,7 @@ export default function ChatPage() {
           <>
             <header className="chat-header">
               <span className="person-avatar">{selected.full_name.slice(0,1).toUpperCase()}</span>
-              <div><strong>{selected.full_name}</strong><small>{selected.is_online ? "online" : "offline"}</small></div>
+              <div><strong>{selected.full_name}</strong><small>{typing ? "typing…" : selected.is_online ? "online" : "offline"}</small></div>
             </header>
 
             <div className="message-list">
@@ -169,7 +215,7 @@ export default function ChatPage() {
             </div>
 
             <div className="composer">
-              <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => {if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void sendMessage();}}} placeholder="Write a message…" />
+              <input value={draft} onChange={(e) => handleDraftChange(e.target.value)} onKeyDown={(e) => {if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void sendMessage();}}} placeholder="Write a message…" />
               <button className="send-button" onClick={() => void sendMessage()} disabled={!draft.trim()}><Send size={18}/></button>
             </div>
           </>
