@@ -20,7 +20,11 @@ export default function AuthPage() {
     event.preventDefault();
     setMessage("");
 
-    const normalizedPhone = phone.trim().replace(/\s+/g, "");
+    let normalizedPhone = phone.trim().replace(/[\s()-]/g, "");
+    if (/^0\d{10}$/.test(normalizedPhone)) {
+      normalizedPhone = "+234" + normalizedPhone.slice(1);
+    }
+    const normalizedUsername = username.trim().replace(/^@+/, "").toLowerCase();
 
     if (!/^\+[1-9]\d{7,14}$/.test(normalizedPhone)) {
       setMessage("Enter your phone number in international format, for example +2348012345678.");
@@ -41,7 +45,7 @@ export default function AuthPage() {
         setMessage("Passwords do not match.");
         return;
       }
-      if (username && !/^[a-zA-Z0-9_]{3,30}$/.test(username)) {
+      if (normalizedUsername && !/^[a-z0-9_]{3,30}$/.test(normalizedUsername)) {
         setMessage("Username must be 3–30 characters using letters, numbers or underscores.");
         return;
       }
@@ -49,14 +53,15 @@ export default function AuthPage() {
 
     setBusy(true);
 
-    if (mode === "signup") {
+    try {
+      if (mode === "signup") {
       const { data, error } = await supabase.auth.signUp({
         phone: normalizedPhone,
         password,
         options: {
           data: {
             full_name: fullName.trim(),
-            username: username.trim() || null,
+            username: normalizedUsername || null,
           },
         },
       });
@@ -77,7 +82,7 @@ export default function AuthPage() {
         id: data.user.id,
         phone: normalizedPhone,
         full_name: fullName.trim(),
-        username: username.trim() || null,
+        username: normalizedUsername || null,
       });
 
       if (profileError) {
@@ -101,7 +106,26 @@ export default function AuthPage() {
       return;
     }
 
-    window.location.href = "/chat";
+      window.location.href = "/chat";
+      return;
+      }
+
+      const { error } = await supabase.auth.signInWithPassword({
+        phone: normalizedPhone,
+        password,
+      });
+
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
+
+      window.location.href = "/chat";
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Registration failed. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
