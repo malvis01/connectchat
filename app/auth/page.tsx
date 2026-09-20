@@ -73,7 +73,7 @@ export default function AuthPage() {
         return;
       }
 
-      const { error: profileError } = await supabase.from("profiles").insert({
+      const { error: profileError } = await supabase.from("profiles").upsert({
         id: data.user.id,
         phone: normalizedPhone,
         full_name: fullName.trim(),
@@ -86,7 +86,7 @@ export default function AuthPage() {
         return;
       }
 
-      window.location.href = "/";
+      window.location.href = "/chat";
       return;
     }
 
@@ -101,7 +101,7 @@ export default function AuthPage() {
       return;
     }
 
-    window.location.href = "/";
+    window.location.href = "/chat";
   }
 
   return (
