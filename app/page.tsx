@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { MessageCircle, Phone, Video, ShieldCheck } from "lucide-react";
 
 const features = [
@@ -20,6 +21,9 @@ export default function Home() {
           <p style={{fontSize:16,lineHeight:1.6,color:"#667085",maxWidth:560,margin:"12px auto 0"}}>
             A focused mobile-first communication app for private conversations, media, voice messages, voice calls and video calls.
           </p>
+        </div>
+        <div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:24}}>
+          <Link href="/auth" style={{background:"#101828",color:"#fff",padding:"12px 18px",borderRadius:12,fontWeight:800}}>Create account / Log in</Link>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:14}}>
           {features.map(([title,Icon,description])=>(
