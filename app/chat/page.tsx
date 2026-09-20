@@ -1,9 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MessageCircle, Search, Send, UserRound } from "lucide-react";
+import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Play, Search, Send, Square, UserRound, Video, X } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
+
+type Attachment = {
+  id: string;
+  message_id: string;
+  storage_path: string;
+  file_name: string;
+  mime_type: string;
+  file_size: number;
+  width: number | null;
+  height: number | null;
+  duration_seconds: number | null;
+};
 
 type Message = {
   id: string;
@@ -12,7 +24,52 @@ type Message = {
   message_type: string;
   created_at: string;
   edited_at: string | null;
+  attachments: Attachment[];
 };
+
+const DOC_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+];
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function safeName(name: string) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120);
+}
+
+function AudioMessage({ src, duration }: { src: string; duration: number | null }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [speed, setSpeed] = useState(1);
+  const [playing, setPlaying] = useState(false);
+  const toggle = async () => {
+    if (!audioRef.current) return;
+    if (audioRef.current.paused) await audioRef.current.play();
+    else audioRef.current.pause();
+  };
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = speed;
+  }, [speed]);
+  return (
+    <div className="voice-message">
+      <audio ref={audioRef} src={src} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
+      <button className="voice-play" onClick={() => void toggle()}>{playing ? <Square size={15}/> : <Play size={15}/>}</button>
+      <div className="voice-wave"><span/><span/><span/><span/><span/><span/><span/><span/></div>
+      <small>{duration ? `${Math.round(duration)}s` : "Voice"}</small>
+      <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Playback speed">
+        <option value={1}>1×</option><option value={1.5}>1.5×</option><option value={2}>2×</option>
+      </select>
+    </div>
+  );
+}
 
 export default function ChatPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -24,31 +81,27 @@ export default function ChatPage() {
   const [draft, setDraft] = useState("");
   const [typing, setTyping] = useState(false);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderStreamRef = useRef<MediaStream | null>(null);
+  const recordTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const [otherOnline, setOtherOnline] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        window.location.href = "/auth";
-        return;
-      }
+      if (!user) { window.location.href = "/auth"; return; }
       const { data: me } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
       if (mounted && me) {
         setProfile(me);
-        await supabase.from("profiles").update({
-          is_online: true,
-          last_seen_at: new Date().toISOString(),
-        }).eq("id", user.id);
+        await supabase.from("profiles").update({ is_online: true, last_seen_at: new Date().toISOString() }).eq("id", user.id);
       }
-      const { data: users } = await supabase
-        .from("profiles")
-        .select("*")
-        .neq("id", user.id)
-        .order("full_name");
+      const { data: users } = await supabase.from("profiles").select("*").neq("id", user.id).order("full_name");
       if (mounted) setPeople(users ?? []);
     })();
     return () => { mounted = false; };
@@ -56,18 +109,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!profile) return;
-    const markOffline = () => {
-      void supabase.from("profiles").update({
-        is_online: false,
-        last_seen_at: new Date().toISOString(),
-      }).eq("id", profile.id);
-    };
-    const markOnline = () => {
-      void supabase.from("profiles").update({
-        is_online: true,
-        last_seen_at: new Date().toISOString(),
-      }).eq("id", profile.id);
-    };
+    const markOffline = () => { void supabase.from("profiles").update({ is_online: false, last_seen_at: new Date().toISOString() }).eq("id", profile.id); };
+    const markOnline = () => { void supabase.from("profiles").update({ is_online: true, last_seen_at: new Date().toISOString() }).eq("id", profile.id); };
     const onVisibility = () => document.visibilityState === "visible" ? markOnline() : markOffline();
     window.addEventListener("beforeunload", markOffline);
     document.addEventListener("visibilitychange", onVisibility);
@@ -78,11 +121,11 @@ export default function ChatPage() {
     };
   }, [profile]);
 
-  useEffect(() => {
-    return () => {
-      if (channelRef.current) void supabase.removeChannel(channelRef.current);
-      if (typingTimer.current) clearTimeout(typingTimer.current);
-    };
+  useEffect(() => () => {
+    if (channelRef.current) void supabase.removeChannel(channelRef.current);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    if (recordTimer.current) clearInterval(recordTimer.current);
+    recorderStreamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
   const filteredPeople = useMemo(() => {
@@ -95,163 +138,199 @@ export default function ChatPage() {
     );
   }, [people, query]);
 
-  async function openChat(person: Profile) {
-    setSelected(person);
-    setMessages([]);
-    setTyping(false);
-    setError("");
-    if (channelRef.current) {
-      await supabase.removeChannel(channelRef.current);
-      channelRef.current = null;
-    }
+  async function loadAttachments(items: Message[]) {
+    if (!items.length) return items;
+    const ids = items.map((m) => m.id);
+    const { data } = await supabase.from("message_attachments").select("*").in("message_id", ids);
+    const byMessage = new Map<string, Attachment[]>();
+    (data ?? []).forEach((a) => byMessage.set(a.message_id, [...(byMessage.get(a.message_id) ?? []), a]));
+    return items.map((m) => ({ ...m, attachments: byMessage.get(m.id) ?? [] }));
+  }
 
+  async function getSignedUrl(path: string) {
+    const { data, error: urlError } = await supabase.storage.from("connectchat-media").createSignedUrl(path, 3600);
+    if (urlError) throw urlError;
+    return data.signedUrl;
+  }
+
+  async function openChat(person: Profile) {
+    setSelected(person); setMessages([]); setTyping(false); setError("");
+    if (channelRef.current) { await supabase.removeChannel(channelRef.current); channelRef.current = null; }
     try {
       const id = await getOrCreateDirectConversation(supabase, person.id);
       setConversationId(id);
-
-      const { data, error: readError } = await supabase
-        .from("messages")
-        .select("id,body,sender_id,message_type,created_at,edited_at")
-        .eq("conversation_id", id)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: true });
+      const { data, error: readError } = await supabase.from("messages")
+        .select("id,body,sender_id,message_type,created_at,edited_at").eq("conversation_id", id)
+        .is("deleted_at", null).order("created_at", { ascending: true });
       if (readError) throw readError;
-      setMessages(data ?? []);
+      setMessages(await loadAttachments((data ?? []).map((m) => ({ ...m, attachments: [] }))));
 
-      const channel = supabase.channel(`chat:${id}`, {
-        config: { presence: { key: profile?.id ?? "anonymous" } },
-      });
-
+      const channel = supabase.channel(`chat:${id}`, { config: { presence: { key: profile?.id ?? "anonymous" } } });
       channel
-        .on("postgres_changes", {
-          event: "INSERT", schema: "public", table: "messages",
-          filter: `conversation_id=eq.${id}`,
-        }, (payload) => {
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${id}` }, async (payload) => {
           const message = payload.new as Message;
-          setMessages((current) =>
-            current.some((item) => item.id === message.id) ? current : [...current, message],
-          );
+          const { data: attachments } = await supabase.from("message_attachments").select("*").eq("message_id", message.id);
+          setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, { ...message, attachments: attachments ?? [] }]);
         })
-        .on("broadcast", { event: "typing" }, ({ payload }) => {
-          if (payload?.userId === person.id) {
-            setTyping(Boolean(payload.isTyping));
-          }
-        })
-        .on("presence", { event: "sync" }, () => {
-          const state = channel.presenceState();
-          setOtherOnline(Boolean(state[person.id]?.length));
-        })
-        .subscribe(async (status) => {
-          if (status === "SUBSCRIBED") {
-            await channel.track({ userId: profile?.id, onlineAt: new Date().toISOString() });
-          }
-        });
-
+        .on("broadcast", { event: "typing" }, ({ payload }) => { if (payload?.userId === person.id) setTyping(Boolean(payload.isTyping)); })
+        .on("presence", { event: "sync" }, () => { const state = channel.presenceState(); setOtherOnline(Boolean(state[person.id]?.length)); })
+        .subscribe(async (status) => { if (status === "SUBSCRIBED") await channel.track({ userId: profile?.id, onlineAt: new Date().toISOString() }); });
       channelRef.current = channel;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not open conversation.");
-    }
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not open conversation."); }
   }
 
   async function broadcastTyping(isTyping: boolean) {
     if (!channelRef.current || !profile) return;
-    await channelRef.current.send({
-      type: "broadcast",
-      event: "typing",
-      payload: { userId: profile.id, isTyping },
-    });
+    await channelRef.current.send({ type: "broadcast", event: "typing", payload: { userId: profile.id, isTyping } });
   }
 
   function handleDraftChange(value: string) {
-    setDraft(value);
-    void broadcastTyping(Boolean(value.trim()));
+    setDraft(value); void broadcastTyping(Boolean(value.trim()));
     if (typingTimer.current) clearTimeout(typingTimer.current);
-    if (value.trim()) {
-      typingTimer.current = setTimeout(() => void broadcastTyping(false), 1200);
-    }
+    if (value.trim()) typingTimer.current = setTimeout(() => void broadcastTyping(false), 1200);
   }
 
   async function sendMessage() {
     if (!conversationId || !profile || !draft.trim()) return;
-    const body = draft.trim();
-    setDraft("");
-    void broadcastTyping(false);
+    const body = draft.trim(); setDraft(""); void broadcastTyping(false);
+    const { error: sendError } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: profile.id, body, message_type: "text" });
+    if (sendError) { setDraft(body); setError(sendError.message); }
+  }
 
-    const { error: sendError } = await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      sender_id: profile.id,
-      body,
-      message_type: "text",
-    });
-    if (sendError) {
-      setDraft(body);
-      setError(sendError.message);
+  async function sendFiles(files: FileList | File[]) {
+    if (!conversationId || !profile) return;
+    const selectedFiles = Array.from(files);
+    if (!selectedFiles.length) return;
+    setUploading(true); setError("");
+    try {
+      for (const file of selectedFiles) {
+        const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : DOC_TYPES.includes(file.type) ? "file" : null;
+        if (!kind) throw new Error(`Unsupported file type: ${file.name}`);
+        if (file.size > 25 * 1024 * 1024) throw new Error("Each file must be 25 MB or smaller.");
+        const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}-${safeName(file.name)}`;
+        const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, file, { contentType: file.type, upsert: false });
+        if (uploadError) throw uploadError;
+        const { data: message, error: messageError } = await supabase.from("messages").insert({
+          conversation_id: conversationId, sender_id: profile.id, message_type: kind
+        }).select("id").single();
+        if (messageError) throw messageError;
+        const { error: attachmentError } = await supabase.from("message_attachments").insert({
+          message_id: message.id, storage_path: path, file_name: file.name, mime_type: file.type || "application/octet-stream",
+          file_size: file.size, width: kind === "image" ? undefined : null, height: kind === "image" ? undefined : null
+        });
+        if (attachmentError) throw attachmentError;
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : "Upload failed."); }
+    finally { setUploading(false); }
+  }
+
+  async function startRecording() {
+    if (!conversationId || !profile) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setError("Voice recording is not supported by this browser.");
+      return;
     }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(chunks, { type: mime });
+        const seconds = recordSeconds;
+        setUploading(true);
+        try {
+          const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}.webm`;
+          const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, blob, { contentType: mime, upsert: false });
+          if (uploadError) throw uploadError;
+          const { data: message, error: messageError } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: profile.id, message_type: "voice" }).select("id").single();
+          if (messageError) throw messageError;
+          const { error: attachmentError } = await supabase.from("message_attachments").insert({ message_id: message.id, storage_path: path, file_name: "voice-message.webm", mime_type: mime, file_size: blob.size, duration_seconds: seconds });
+          if (attachmentError) throw attachmentError;
+        } catch (e) { setError(e instanceof Error ? e.message : "Voice upload failed."); }
+        finally { setUploading(false); }
+      };
+      recorderRef.current = recorder; recorderStreamRef.current = stream; setRecordSeconds(0); setRecording(true);
+      recorder.start(); recordTimer.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
+    } catch (e) { setError(e instanceof Error ? e.message : "Microphone permission was denied."); }
+  }
+
+  function stopRecording() {
+    if (!recorderRef.current) return;
+    recorderRef.current.stop(); recorderRef.current = null; setRecording(false);
+    if (recordTimer.current) { clearInterval(recordTimer.current); recordTimer.current = null; }
+  }
+
+  async function openAttachment(attachment: Attachment) {
+    try { window.open(await getSignedUrl(attachment.storage_path), "_blank", "noopener,noreferrer"); }
+    catch (e) { setError(e instanceof Error ? e.message : "Could not open file."); }
+  }
+
+  async function renderAttachment(attachment: Attachment) {
+    try {
+      const url = await getSignedUrl(attachment.storage_path);
+      if (attachment.mime_type.startsWith("image/")) return <img src={url} alt={attachment.file_name} className="message-image" />;
+      if (attachment.mime_type.startsWith("video/")) return <video src={url} controls playsInline className="message-video" />;
+      if (attachment.mime_type.startsWith("audio/")) return <AudioMessage src={url} duration={attachment.duration_seconds} />;
+      return <button className="file-card" onClick={() => void openAttachment(attachment)}><FileText size={24}/><span><strong>{attachment.file_name}</strong><small>{formatSize(attachment.file_size)} · Open</small></span></button>;
+    } catch { return <div className="file-card"><FileText size={24}/><span><strong>{attachment.file_name}</strong><small>Unable to load preview</small></span></div>; }
   }
 
   return (
     <main className="chat-shell">
       <aside className="chat-sidebar">
         <div className="chat-sidebar-header">
-          <div className="auth-brand" style={{margin:0}}>
-            <span className="auth-logo"><MessageCircle size={21}/></span>
-            <div><strong>ConnectChat</strong><span>Private chats</span></div>
-          </div>
+          <div className="auth-brand" style={{margin:0}}><span className="auth-logo"><MessageCircle size={21}/></span><div><strong>ConnectChat</strong><span>Private chats</span></div></div>
           <button className="icon-button" title="Profile"><UserRound size={19}/></button>
         </div>
-
-        <div className="search-box">
-          <Search size={17}/>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search people by name, username or phone"/>
-        </div>
-
+        <div className="search-box"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search people by name, username or phone"/></div>
         <div className="people-list">
-          {filteredPeople.map((person) => (
-            <button key={person.id} className={`person-row ${selected?.id === person.id ? "active" : ""}`} onClick={() => void openChat(person)}>
-              <span className="person-avatar">{person.full_name.slice(0,1).toUpperCase()}</span>
-              <span className="person-info"><strong>{person.full_name}</strong><small>{person.username ? `@${person.username}` : person.phone}</small></span>
-              <span className={`presence ${person.id === selected?.id ? (otherOnline ? "online" : "") : (person.is_online ? "online" : "")}`}/>
-            </button>
-          ))}
+          {filteredPeople.map((person) => <button key={person.id} className={`person-row ${selected?.id === person.id ? "active" : ""}`} onClick={() => void openChat(person)}>
+            <span className="person-avatar">{person.full_name.slice(0,1).toUpperCase()}</span><span className="person-info"><strong>{person.full_name}</strong><small>{person.username ? `@${person.username}` : person.phone}</small></span>
+            <span className={`presence ${person.id === selected?.id ? (otherOnline ? "online" : "") : (person.is_online ? "online" : "")}`}/>
+          </button>)}
           {!filteredPeople.length && <p className="empty-state">No other users yet.</p>}
         </div>
       </aside>
-
       <section className="chat-panel">
-        {!selected ? (
-          <div className="chat-empty">
-            <MessageCircle size={42}/>
-            <h1>Start a private conversation</h1>
-            <p>Choose a person from the left to begin messaging in real time.</p>
+        {!selected ? <div className="chat-empty"><MessageCircle size={42}/><h1>Start a private conversation</h1><p>Choose a person from the left to begin messaging in real time.</p></div> : <>
+          <header className="chat-header"><span className="person-avatar">{selected.full_name.slice(0,1).toUpperCase()}</span><div><strong>{selected.full_name}</strong><small>{typing ? "typing…" : otherOnline || selected.is_online ? "online" : "offline"}</small></div></header>
+          <div className="message-list">
+            {messages.map((message) => {
+              const mine = message.sender_id === profile?.id;
+              return <div key={message.id} className={`message-row ${mine ? "mine" : ""}`}><div className="message-bubble">
+                {message.body && <div>{message.body}</div>}
+                {message.attachments.map((attachment) => <AttachmentView key={attachment.id} attachment={attachment} onOpen={openAttachment} getUrl={getSignedUrl}/>)}
+                <time>{new Date(message.created_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</time>
+              </div></div>;
+            })}
+            {!messages.length && <p className="empty-state">No messages yet. Say hello.</p>}
           </div>
-        ) : (
-          <>
-            <header className="chat-header">
-              <span className="person-avatar">{selected.full_name.slice(0,1).toUpperCase()}</span>
-              <div><strong>{selected.full_name}</strong><small>{typing ? "typing…" : otherOnline || selected.is_online ? "online" : "offline"}</small></div>
-            </header>
-
-            <div className="message-list">
-              {messages.map((message) => {
-                const mine = message.sender_id === profile?.id;
-                return <div key={message.id} className={`message-row ${mine ? "mine" : ""}`}>
-                  <div className="message-bubble">
-                    {message.body}
-                    <time>{new Date(message.created_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</time>
-                  </div>
-                </div>;
-              })}
-              {!messages.length && <p className="empty-state">No messages yet. Say hello.</p>}
-            </div>
-
+          <div className="composer-wrap">
+            {recording && <div className="recording-bar"><span className="recording-dot"/> Recording {recordSeconds}s <button onClick={stopRecording}>Send</button></div>}
             <div className="composer">
-              <input value={draft} onChange={(e) => handleDraftChange(e.target.value)} onKeyDown={(e) => {if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void sendMessage();}}} placeholder="Write a message…" />
-              <button className="send-button" onClick={() => void sendMessage()} disabled={!draft.trim()}><Send size={18}/></button>
+              <label className="attach-button" title="Photos, videos or files"><Paperclip size={19}/><input type="file" multiple accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(e) => { if (e.target.files) void sendFiles(e.target.files); e.currentTarget.value = ""; }}/></label>
+              <label className="attach-button mobile-photo" title="Photos and videos"><ImagePlus size={19}/><input type="file" multiple accept="image/*,video/*" onChange={(e) => { if (e.target.files) void sendFiles(e.target.files); e.currentTarget.value = ""; }}/></label>
+              <button className={`attach-button ${recording ? "recording" : ""}`} onClick={() => recording ? stopRecording() : void startRecording()} title={recording ? "Stop and send" : "Record voice"}>{recording ? <Square size={18}/> : <Mic size={19}/>}</button>
+              <input value={draft} onChange={(e) => handleDraftChange(e.target.value)} onKeyDown={(e) => {if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void sendMessage();}}} placeholder={uploading ? "Uploading…" : "Write a message…" } disabled={uploading || recording}/>
+              <button className="send-button" onClick={() => void sendMessage()} disabled={!draft.trim() || uploading || recording}><Send size={18}/></button>
             </div>
-          </>
-        )}
-        {error && <div className="chat-error">{error}</div>}
+          </div>
+        </>}
+        {error && <div className="chat-error">{error}<button onClick={() => setError("")}><X size={14}/></button></div>}
       </section>
     </main>
   );
+}
+
+function AttachmentView({attachment,onOpen,getUrl}:{attachment:Attachment;onOpen:(a:Attachment)=>void;getUrl:(path:string)=>Promise<string>}) {
+  const [url,setUrl]=useState("");
+  useEffect(()=>{let alive=true; void getUrl(attachment.storage_path).then((u)=>{if(alive)setUrl(u)}).catch(()=>{}); return()=>{alive=false}},[attachment.storage_path,getUrl]);
+  if (!url) return <div className="attachment-loading">Loading {attachment.file_name}…</div>;
+  if (attachment.mime_type.startsWith("image/")) return <img src={url} alt={attachment.file_name} className="message-image" onClick={()=>onOpen(attachment)}/>;
+  if (attachment.mime_type.startsWith("video/")) return <video src={url} controls playsInline className="message-video"/>;
+  if (attachment.mime_type.startsWith("audio/")) return <AudioMessage src={url} duration={attachment.duration_seconds}/>;
+  return <button className="file-card" onClick={()=>onOpen(attachment)}><FileText size={24}/><span><strong>{attachment.file_name}</strong><small>{formatSize(attachment.file_size)} · Open</small></span></button>;
 }
