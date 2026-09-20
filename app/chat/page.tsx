@@ -222,9 +222,9 @@ export default function ChatPage() {
     setShowStickers(false);
   }
 
-  async function endCall(status:"ended"|"declined"|"missed"|"failed"="ended"){
+  async function endCall(status:"ended"|"declined"|"missed"|"failed"="ended", notifyRemote=true){
     if(!call)return;
-    await callChannelRef.current?.send({type:"broadcast",event:"signal",payload:{from:profile?.id,type:status==="declined"?"decline":"hangup"}});
+    if (notifyRemote) await callChannelRef.current?.send({type:"broadcast",event:"signal",payload:{from:profile?.id,type:status==="declined"?"decline":"hangup"}});
     await supabase.from("calls").update({status,ended_at:new Date().toISOString()}).eq("id",call.id);
     peerRef.current?.close(); peerRef.current=null;
     localStream?.getTracks().forEach(t=>t.stop()); setLocalStream(null); setRemoteStream(null); setCall(null); setCallSeconds(0);
@@ -251,7 +251,7 @@ export default function ChatPage() {
         }
         if(payload.type==="answer"){await pc.setRemoteDescription(payload.answer);await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",data.id);setCall(c=>c?{...c,status:"active"}:c);}
         if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
-        if(payload.type==="decline"||payload.type==="hangup")await endCall(payload.type==="decline"?"declined":"ended");
+        if(payload.type==="decline"||payload.type==="hangup")await endCall(payload.type==="decline"?"declined":"ended",false);
       }).subscribe();
       const invite=supabase.channel(`user-call:${selected.id}`);
       invite.subscribe(async status=>{if(status==="SUBSCRIBED"){await invite.send({type:"broadcast",event:"invite",payload:{from:profile.id,callId:data.id,callType:type,conversationId}});setTimeout(()=>{void supabase.removeChannel(invite)},5000);}});
@@ -271,7 +271,7 @@ export default function ChatPage() {
         if(payload?.from===profile.id)return;
         if(payload.type==="offer"){await pc.setRemoteDescription(payload.offer);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"answer",answer}});await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",callId);}
         if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
-        if(payload.type==="hangup")await endCall("ended");
+        if(payload.type==="hangup")await endCall("ended",false);
       }).subscribe(async status=>{if(status==="SUBSCRIBED"){await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ready"}});}});
       pc.onicecandidate=e=>{if(e.candidate)void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ice",candidate:e.candidate}})};
       await supabase.from("call_participants").upsert({call_id:callId,user_id:profile.id,joined_at:new Date().toISOString()});
