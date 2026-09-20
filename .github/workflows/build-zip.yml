@@ -1,0 +1,15 @@
+name: Build ConnectChat ZIP
+on:
+  push:
+    branches: [main]
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create deployment ZIP
+        run: zip -r connectchat-netlify.zip . -x ".git/*" ".github/*" "node_modules/*" ".next/*"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: connectchat-netlify
+          path: connectchat-netlify.zip
