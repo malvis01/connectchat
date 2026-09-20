@@ -528,3 +528,55 @@ using (
   bucket_id = 'connectchat-media'
   and split_part(name, '/', 2)::uuid = (select auth.uid())
 );
+
+-- Call signaling metadata and participant state are persisted here.
+-- WebRTC media itself stays peer-to-peer; Supabase Realtime carries signaling.
+create index if not exists calls_conversation_created_idx on public.calls(conversation_id, created_at desc);
+create index if not exists call_participants_user_created_idx on public.call_participants(user_id, joined_at desc);
+
+alter table public.calls enable row level security;
+alter table public.call_participants enable row level security;
+
+drop policy if exists calls_select_member on public.calls;
+create policy calls_select_member on public.calls for select to authenticated
+using (exists (
+  select 1 from public.conversation_members cm
+  where cm.conversation_id = calls.conversation_id and cm.user_id = (select auth.uid())
+));
+
+drop policy if exists calls_insert_member on public.calls;
+create policy calls_insert_member on public.calls for insert to authenticated
+with check (initiated_by = (select auth.uid()) and exists (
+  select 1 from public.conversation_members cm
+  where cm.conversation_id = calls.conversation_id and cm.user_id = (select auth.uid())
+));
+
+drop policy if exists calls_update_member on public.calls;
+create policy calls_update_member on public.calls for update to authenticated
+using (exists (
+  select 1 from public.conversation_members cm
+  where cm.conversation_id = calls.conversation_id and cm.user_id = (select auth.uid())
+))
+with check (exists (
+  select 1 from public.conversation_members cm
+  where cm.conversation_id = calls.conversation_id and cm.user_id = (select auth.uid())
+));
+
+drop policy if exists call_participants_select_member on public.call_participants;
+create policy call_participants_select_member on public.call_participants for select to authenticated
+using (exists (
+  select 1 from public.calls c join public.conversation_members cm on cm.conversation_id = c.conversation_id
+  where c.id = call_participants.call_id and cm.user_id = (select auth.uid())
+));
+
+drop policy if exists call_participants_insert_self on public.call_participants;
+create policy call_participants_insert_self on public.call_participants for insert to authenticated
+with check (user_id = (select auth.uid()) and exists (
+  select 1 from public.calls c join public.conversation_members cm on cm.conversation_id = c.conversation_id
+  where c.id = call_participants.call_id and cm.user_id = (select auth.uid())
+));
+
+drop policy if exists call_participants_update_self on public.call_participants;
+create policy call_participants_update_self on public.call_participants for update to authenticated
+using (user_id = (select auth.uid()))
+with check (user_id = (select auth.uid()));
