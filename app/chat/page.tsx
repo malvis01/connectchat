@@ -27,6 +27,7 @@ type Message = {
   created_at: string;
   edited_at: string | null;
   attachments: Attachment[];
+  reactions: Reaction[];
 };
 
 const DOC_TYPES = [
@@ -96,7 +97,16 @@ export default function ChatPage() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recorderStreamRef = useRef<MediaStream | null>(null);
   const recordTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [otherOnline, setOtherOnline] = useState(false);\n  const [call,setCall]=useState<{id:string;type:"voice"|"video";incoming:boolean;status:string}|null>(null);\n  const [callSeconds,setCallSeconds]=useState(0);\n  const [callMuted,setCallMuted]=useState(false);\n  const [cameraOff,setCameraOff]=useState(false);\n  const [localStream,setLocalStream]=useState<MediaStream|null>(null);\n  const [remoteStream,setRemoteStream]=useState<MediaStream|null>(null);\n  const peerRef=useRef<RTCPeerConnection|null>(null);\n  const callChannelRef=useRef<ReturnType<typeof supabase.channel>|null>(null);\n  const callTimerRef=useRef<ReturnType<typeof setInterval>|null>(null);
+  const [otherOnline, setOtherOnline] = useState(false);
+  const [call,setCall]=useState<{id:string;type:"voice"|"video";incoming:boolean;status:string}|null>(null);
+  const [callSeconds,setCallSeconds]=useState(0);
+  const [callMuted,setCallMuted]=useState(false);
+  const [cameraOff,setCameraOff]=useState(false);
+  const [localStream,setLocalStream]=useState<MediaStream|null>(null);
+  const [remoteStream,setRemoteStream]=useState<MediaStream|null>(null);
+  const peerRef=useRef<RTCPeerConnection|null>(null);
+  const callChannelRef=useRef<ReturnType<typeof supabase.channel>|null>(null);
+  const callTimerRef=useRef<ReturnType<typeof setInterval>|null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -113,6 +123,27 @@ export default function ChatPage() {
     })();
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (!profile) return;
+    const channel = supabase.channel(`user-call:${profile.id}`);
+    channel.on("broadcast", { event: "invite" }, async ({ payload }) => {
+      if (!payload?.callId || payload.from === profile.id) return;
+      const { data: caller } = await supabase.from("profiles").select("*").eq("id", payload.from).maybeSingle();
+      if (!caller) return;
+      setSelected(caller);
+      setConversationId(payload.conversationId ?? null);
+      setCall({ id: payload.callId, type: payload.callType === "video" ? "video" : "voice", incoming: true, status: "ringing" });
+    }).subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [profile]);
+
+  useEffect(() => {
+    if (!call || call.status !== "active") return;
+    setCallSeconds(0);
+    callTimerRef.current = setInterval(() => setCallSeconds((seconds) => seconds + 1), 1000);
+    return () => { if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; } };
+  }, [call?.id, call?.status]);
 
   useEffect(() => {
     if (!profile) return;
@@ -212,10 +243,17 @@ export default function ChatPage() {
       const ch=supabase.channel("call:"+data.id);
       ch.on("broadcast",{event:"signal"},async({payload})=>{
         if(payload?.from===profile.id)return;
-        if(payload.type==="answer")await pc.setRemoteDescription(payload.answer);
+        if(payload.type==="ready"){
+          const offer=await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"offer",offer}});
+        }
+        if(payload.type==="answer"){await pc.setRemoteDescription(payload.answer);await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",data.id);setCall(c=>c?{...c,status:"active"}:c);}
         if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
         if(payload.type==="decline"||payload.type==="hangup")await endCall(payload.type==="decline"?"declined":"ended");
-      }).subscribe(async status=>{if(status==="SUBSCRIBED"){const offer=await pc.createOffer();await pc.setLocalDescription(offer);await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"offer",offer}});}});
+      }).subscribe();
+      const invite=supabase.channel(`user-call:${selected.id}`);
+      invite.subscribe(async status=>{if(status==="SUBSCRIBED"){await invite.send({type:"broadcast",event:"invite",payload:{from:profile.id,callId:data.id,callType:type,conversationId}});setTimeout(()=>{void supabase.removeChannel(invite)},5000);}});
       pc.onicecandidate=e=>{if(e.candidate)void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ice",candidate:e.candidate}})};
       setLocalStream(media);setCall({id:data.id,type,incoming:false,status:"ringing"});callChannelRef.current=ch;peerRef.current=pc;
     }catch(e){setError(e instanceof Error?e.message:"Could not start call.");}
@@ -233,7 +271,7 @@ export default function ChatPage() {
         if(payload.type==="offer"){await pc.setRemoteDescription(payload.offer);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"answer",answer}});await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",callId);}
         if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
         if(payload.type==="hangup")await endCall("ended");
-      }).subscribe();
+      }).subscribe(async status=>{if(status==="SUBSCRIBED"){await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ready"}});}});
       pc.onicecandidate=e=>{if(e.candidate)void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ice",candidate:e.candidate}})};
       await supabase.from("call_participants").upsert({call_id:callId,user_id:profile.id,joined_at:new Date().toISOString()});
       setLocalStream(media);setCall(c=>c?{...c,status:"active"}:c);callChannelRef.current=ch;peerRef.current=pc;
@@ -428,7 +466,8 @@ export default function ChatPage() {
             </div>
           </div>
         </>}
-        {call&&<div className="call-overlay"><div className="call-card"><div className="call-title">{call.incoming?"Incoming":call.status==="ringing"?"Calling":"Call"} {call.type}</div><div className="call-person"><span className="person-avatar">{selected?.full_name.slice(0,1).toUpperCase()??"?"}</span><strong>{selected?.full_name??"ConnectChat user"}</strong><small>{call.status==="ringing"?"Ringing…":Math.floor(callSeconds/60)+":"+String(callSeconds%60).padStart(2,"0")}</small></div>{call.type==="video"&&<div className="video-stage">{remoteStream?<video autoPlay playsInline ref={n=>{if(n)n.srcObject=remoteStream}} className="remote-video"/>:<div className="video-wait">Waiting for camera…</div>}{localStream&&<video autoPlay muted playsInline ref={n=>{if(n)n.srcObject=localStream}} className="local-video"/>}</div>}<div className="call-controls">{call.incoming&&call.status==="ringing"?<><button className="call-action accept" onClick={()=>void acceptCall(call.id,call.type)}>Accept</button><button className="call-action decline" onClick={()=>void endCall("declined")}>Decline</button></>:<><button className="call-action" onClick={()=>setCallMuted(v=>!v)}>{callMuted?"Unmute":"Mute"}</button>{call.type==="video"&&<button className="call-action" onClick={()=>setCameraOff(v=>!v)}>{cameraOff?"Camera on":"Camera off"}</button>}<button className="call-action decline" onClick={()=>void endCall()}>End call</button></>}</div></div></div>}\n        {error && <div className="chat-error">{error}<button onClick={() => setError("")}><X size={14}/></button></div>}
+        {call&&<div className="call-overlay"><div className="call-card"><div className="call-title">{call.incoming?"Incoming":call.status==="ringing"?"Calling":"Call"} {call.type}</div><div className="call-person"><span className="person-avatar">{selected?.full_name.slice(0,1).toUpperCase()??"?"}</span><strong>{selected?.full_name??"ConnectChat user"}</strong><small>{call.status==="ringing"?"Ringing…":Math.floor(callSeconds/60)+":"+String(callSeconds%60).padStart(2,"0")}</small></div>{call.type==="video"&&<div className="video-stage">{remoteStream?<video autoPlay playsInline ref={n=>{if(n)n.srcObject=remoteStream}} className="remote-video"/>:<div className="video-wait">Waiting for camera…</div>}{localStream&&<video autoPlay muted playsInline ref={n=>{if(n)n.srcObject=localStream}} className="local-video"/>}</div>}<div className="call-controls">{call.incoming&&call.status==="ringing"?<><button className="call-action accept" onClick={()=>void acceptCall(call.id,call.type)}>Accept</button><button className="call-action decline" onClick={()=>void endCall("declined")}>Decline</button></>:<><button className="call-action" onClick={()=>setCallMuted(v=>!v)}>{callMuted?"Unmute":"Mute"}</button>{call.type==="video"&&<button className="call-action" onClick={()=>setCameraOff(v=>!v)}>{cameraOff?"Camera on":"Camera off"}</button>}<button className="call-action decline" onClick={()=>void endCall()}>End call</button></>}</div></div></div>}
+        {error && <div className="chat-error">{error}<button onClick={() => setError("")}><X size={14}/></button></div>}
       </section>
     </main>
   );
