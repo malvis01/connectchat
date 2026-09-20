@@ -245,8 +245,65 @@ drop policy if exists messages_update_sender on public.messages;
 create policy messages_update_sender
 on public.messages for update
 to authenticated
-using (sender_id = (select auth.uid()))
-with check (sender_id = (select auth.uid()));
+using (
+  sender_id = (select auth.uid())
+  and exists (
+    select 1 from public.conversation_members cm
+    where cm.conversation_id = messages.conversation_id
+      and cm.user_id = (select auth.uid())
+  )
+)
+with check (
+  sender_id = (select auth.uid())
+  and exists (
+    select 1 from public.conversation_members cm
+    where cm.conversation_id = messages.conversation_id
+      and cm.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists messages_delete_sender on public.messages;
+create policy messages_delete_sender
+on public.messages for delete
+to authenticated
+using (
+  sender_id = (select auth.uid())
+  and exists (
+    select 1 from public.conversation_members cm
+    where cm.conversation_id = messages.conversation_id
+      and cm.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists attachments_insert_sender_member on public.message_attachments;
+create policy attachments_insert_sender_member
+on public.message_attachments for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.messages m
+    join public.conversation_members cm on cm.conversation_id = m.conversation_id
+    where m.id = message_attachments.message_id
+      and m.sender_id = (select auth.uid())
+      and cm.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists reactions_insert_member on public.message_reactions;
+create policy reactions_insert_member
+on public.message_reactions for insert
+to authenticated
+with check (
+  user_id = (select auth.uid())
+  and exists (
+    select 1
+    from public.messages m
+    join public.conversation_members cm on cm.conversation_id = m.conversation_id
+    where m.id = message_reactions.message_id
+      and cm.user_id = (select auth.uid())
+  )
+);
 
 drop policy if exists attachments_select_member on public.message_attachments;
 create policy attachments_select_member
