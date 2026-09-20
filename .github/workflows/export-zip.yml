@@ -8,9 +8,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Create ZIP
-        run: git archive --format=zip --output=connectchat-current.zip HEAD
+        run: git archive --format=zip --output=connectchat-current.zip HEAD~2
       - name: Upload ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: connectchat-current
+          name: connectchat-current-clean
           path: connectchat-current.zip
