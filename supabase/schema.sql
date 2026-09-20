@@ -128,6 +128,18 @@ create index if not exists profiles_phone_idx
 create index if not exists calls_conversation_created_idx
   on public.calls(conversation_id, created_at desc);
 
+create table if not exists public.direct_conversations (
+  user_one uuid not null references public.profiles(id) on delete cascade,
+  user_two uuid not null references public.profiles(id) on delete cascade,
+  conversation_id uuid not null unique references public.conversations(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_one, user_two),
+  check (user_one < user_two)
+);
+
+create index if not exists direct_conversations_conversation_idx
+  on public.direct_conversations(conversation_id);
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -151,6 +163,7 @@ for each row execute function public.set_updated_at();
 alter table public.profiles enable row level security;
 alter table public.conversations enable row level security;
 alter table public.conversation_members enable row level security;
+alter table public.direct_conversations enable row level security;
 alter table public.messages enable row level security;
 alter table public.message_attachments enable row level security;
 alter table public.message_reactions enable row level security;
@@ -200,10 +213,8 @@ using (
 );
 
 drop policy if exists conversation_members_insert_self on public.conversation_members;
-create policy conversation_members_insert_self
-on public.conversation_members for insert
-to authenticated
-with check ((select auth.uid()) = user_id);
+-- Membership is created only by the trusted direct-conversation RPC below.
+-- Clients cannot add themselves to arbitrary private conversations.
 
 drop policy if exists messages_select_member on public.messages;
 create policy messages_select_member
@@ -324,3 +335,67 @@ create policy sticker_packs_select_authenticated
 on public.sticker_packs for select
 to authenticated
 using (is_active = true);
+
+
+create or replace function public.get_or_create_direct_conversation(other_user_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  first_user uuid;
+  second_user uuid;
+  existing_id uuid;
+  new_id uuid;
+begin
+  if me is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if other_user_id is null or other_user_id = me then
+    raise exception 'Invalid conversation participant';
+  end if;
+
+  first_user := least(me, other_user_id);
+  second_user := greatest(me, other_user_id);
+
+  select conversation_id into existing_id
+  from public.direct_conversations
+  where user_one = first_user and user_two = second_user;
+
+  if existing_id is not null then
+    return existing_id;
+  end if;
+
+  insert into public.conversations(kind)
+  values ('direct')
+  returning id into new_id;
+
+  insert into public.direct_conversations(user_one, user_two, conversation_id)
+  values (first_user, second_user, new_id)
+  on conflict (user_one, user_two) do update
+    set conversation_id = excluded.conversation_id
+  returning conversation_id into existing_id;
+
+  if existing_id <> new_id then
+    delete from public.conversations where id = new_id;
+    return existing_id;
+  end if;
+
+  insert into public.conversation_members(conversation_id, user_id)
+  values (new_id, first_user), (new_id, second_user);
+
+  return new_id;
+end;
+$$;
+
+revoke all on function public.get_or_create_direct_conversation(uuid) from public;
+grant execute on function public.get_or_create_direct_conversation(uuid) to authenticated;
+
+drop policy if exists direct_conversations_select_member on public.direct_conversations;
+create policy direct_conversations_select_member
+on public.direct_conversations for select
+to authenticated
+using (auth.uid() in (user_one, user_two));
