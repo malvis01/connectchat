@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Play, Search, Send, Square, UserRound, Video, X } from "lucide-react";
+import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Play, Search, Send, Smile, Square, Sticker, UserRound, X } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
 
@@ -17,6 +17,8 @@ type Attachment = {
   duration_seconds: number | null;
 };
 
+type Reaction = { message_id: string; user_id: string; emoji: string };
+type Sticker = { id: string; pack_id: string; name: string; image_url: string };
 type Message = {
   id: string;
   body: string | null;
@@ -84,6 +86,11 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [showStickers, setShowStickers] = useState(false);
+  const [stickers, setStickers] = useState<Sticker[]>([]);
+  const [reactions, setReactions] = useState<Record<string, Reaction[]>>({});
+  const emojiList = ["😀","😂","😍","😊","😎","😭","😢","😡","👍","👎","❤️","🔥","🎉","🙏","👏","💯","🤣","😮","🤔","🥰"];
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -144,13 +151,44 @@ export default function ChatPage() {
     const { data } = await supabase.from("message_attachments").select("*").in("message_id", ids);
     const byMessage = new Map<string, Attachment[]>();
     (data ?? []).forEach((a) => byMessage.set(a.message_id, [...(byMessage.get(a.message_id) ?? []), a]));
-    return items.map((m) => ({ ...m, attachments: byMessage.get(m.id) ?? [] }));
+    const { data: reactionRows } = await supabase.from("message_reactions").select("message_id,user_id,emoji").in("message_id", ids);
+    const byReaction = new Map<string, Reaction[]>();
+    (reactionRows ?? []).forEach((r) => byReaction.set(r.message_id, [...(byReaction.get(r.message_id) ?? []), r]));
+    return items.map((m) => ({ ...m, attachments: byMessage.get(m.id) ?? [], reactions: byReaction.get(m.id) ?? [] }));
   }
 
   async function getSignedUrl(path: string) {
     const { data, error: urlError } = await supabase.storage.from("connectchat-media").createSignedUrl(path, 3600);
     if (urlError) throw urlError;
     return data.signedUrl;
+  }
+
+  async function loadStickers() {
+    const { data } = await supabase.from("stickers").select("id,pack_id,name,image_url").order("sort_order").limit(60);
+    setStickers(data ?? []);
+  }
+
+  async function toggleReaction(messageId: string, emoji: string) {
+    if (!profile || !conversationId) return;
+    const existing = reactions[messageId]?.find((r) => r.user_id === profile.id && r.emoji === emoji);
+    const result = existing
+      ? await supabase.from("message_reactions").delete().eq("message_id", messageId).eq("user_id", profile.id).eq("emoji", emoji)
+      : await supabase.from("message_reactions").insert({ message_id: messageId, user_id: profile.id, emoji });
+    if (result.error) { setError(result.error.message); return; }
+    const next = existing
+      ? (reactions[messageId] ?? []).filter((r) => !(r.user_id === profile.id && r.emoji === emoji))
+      : [...(reactions[messageId] ?? []), { message_id: messageId, user_id: profile.id, emoji }];
+    setReactions((current) => ({ ...current, [messageId]: next }));
+    await channelRef.current?.send({ type: "broadcast", event: "reaction", payload: { messageId, emoji, userId: profile.id, active: !existing } });
+  }
+
+  async function sendSticker(sticker: Sticker) {
+    if (!conversationId || !profile) return;
+    const { error: sendError } = await supabase.from("messages").insert({
+      conversation_id: conversationId, sender_id: profile.id, body: sticker.image_url, message_type: "sticker"
+    });
+    if (sendError) setError(sendError.message);
+    setShowStickers(false);
   }
 
   async function openChat(person: Profile) {
@@ -163,16 +201,32 @@ export default function ChatPage() {
         .select("id,body,sender_id,message_type,created_at,edited_at").eq("conversation_id", id)
         .is("deleted_at", null).order("created_at", { ascending: true });
       if (readError) throw readError;
-      setMessages(await loadAttachments((data ?? []).map((m) => ({ ...m, attachments: [] }))));
+      const loaded = await loadAttachments((data ?? []).map((m) => ({ ...m, attachments: [], reactions: [] })));
+      setMessages(loaded);
+      const reactionMap: Record<string, Reaction[]> = {};
+      loaded.forEach((m) => { reactionMap[m.id] = m.reactions; });
+      setReactions(reactionMap);
+      void loadStickers();
 
       const channel = supabase.channel(`chat:${id}`, { config: { presence: { key: profile?.id ?? "anonymous" } } });
       channel
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${id}` }, async (payload) => {
           const message = payload.new as Message;
           const { data: attachments } = await supabase.from("message_attachments").select("*").eq("message_id", message.id);
-          setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, { ...message, attachments: attachments ?? [] }]);
+          setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, { ...message, attachments: attachments ?? [], reactions: [] }]);
         })
         .on("broadcast", { event: "typing" }, ({ payload }) => { if (payload?.userId === person.id) setTyping(Boolean(payload.isTyping)); })
+        .on("broadcast", { event: "reaction" }, ({ payload }) => {
+          if (!payload?.messageId || payload.userId === profile?.id) return;
+          setReactions((current) => {
+            const list = current[payload.messageId] ?? [];
+            const exists = list.some((r) => r.user_id === payload.userId && r.emoji === payload.emoji);
+            const next = payload.active && !exists
+              ? [...list, { message_id: payload.messageId, user_id: payload.userId, emoji: payload.emoji }]
+              : payload.active ? list : list.filter((r) => !(r.user_id === payload.userId && r.emoji === payload.emoji));
+            return { ...current, [payload.messageId]: next };
+          });
+        })
         .on("presence", { event: "sync" }, () => { const state = channel.presenceState(); setOtherOnline(Boolean(state[person.id]?.length)); })
         .subscribe(async (status) => { if (status === "SUBSCRIBED") await channel.track({ userId: profile?.id, onlineAt: new Date().toISOString() }); });
       channelRef.current = channel;
@@ -301,18 +355,24 @@ export default function ChatPage() {
             {messages.map((message) => {
               const mine = message.sender_id === profile?.id;
               return <div key={message.id} className={`message-row ${mine ? "mine" : ""}`}><div className="message-bubble">
-                {message.body && <div>{message.body}</div>}
+                {message.message_type === "sticker" && message.body ? <img src={message.body} alt="Sticker" className="message-sticker" /> : message.body && <div>{message.body}</div>}
+                {message.reactions.length > 0 && <div className="reaction-summary">{Object.entries(message.reactions.reduce<Record<string, number>>((a, r) => { a[r.emoji] = (a[r.emoji] ?? 0) + 1; return a; }, {})).map(([emoji, count]) => <button key={emoji} onClick={() => void toggleReaction(message.id, emoji)}>{emoji} {count}</button>)}</div>}
+                <div className="reaction-picker"><button title="Like" onClick={() => void toggleReaction(message.id, "👍")}>👍</button><button onClick={() => void toggleReaction(message.id, "❤️")}>❤️</button><button onClick={() => void toggleReaction(message.id, "😂")}>😂</button><button onClick={() => void toggleReaction(message.id, "🔥")}>🔥</button></div>
                 {message.attachments.map((attachment) => <AttachmentView key={attachment.id} attachment={attachment} onOpen={openAttachment} getUrl={getSignedUrl}/>)}
                 <time>{new Date(message.created_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</time>
               </div></div>;
             })}
             {!messages.length && <p className="empty-state">No messages yet. Say hello.</p>}
           </div>
+          {showEmoji && <div className="emoji-panel">{emojiList.map((emoji) => <button key={emoji} onClick={() => { setDraft((d) => d + emoji); setShowEmoji(false); }}>{emoji}</button>)}</div>}
+          {showStickers && <div className="sticker-panel">{stickers.length ? stickers.map((sticker) => <button key={sticker.id} onClick={() => void sendSticker(sticker)}><img src={sticker.image_url} alt={sticker.name}/></button>) : <p>No sticker packs installed yet.</p>}</div>}
           <div className="composer-wrap">
             {recording && <div className="recording-bar"><span className="recording-dot"/> Recording {recordSeconds}s <button onClick={stopRecording}>Send</button></div>}
             <div className="composer">
               <label className="attach-button" title="Photos, videos or files"><Paperclip size={19}/><input type="file" multiple accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(e) => { if (e.target.files) void sendFiles(e.target.files); e.currentTarget.value = ""; }}/></label>
               <label className="attach-button mobile-photo" title="Photos and videos"><ImagePlus size={19}/><input type="file" multiple accept="image/*,video/*" onChange={(e) => { if (e.target.files) void sendFiles(e.target.files); e.currentTarget.value = ""; }}/></label>
+              <button className="attach-button" title="Emoji" onClick={() => { setShowEmoji((v) => !v); setShowStickers(false); }}><Smile size={19}/></button>
+              <button className="attach-button" title="Stickers" onClick={() => { setShowStickers((v) => !v); setShowEmoji(false); }}><Sticker size={19}/></button>
               <button className={`attach-button ${recording ? "recording" : ""}`} onClick={() => recording ? stopRecording() : void startRecording()} title={recording ? "Stop and send" : "Record voice"}>{recording ? <Square size={18}/> : <Mic size={19}/>}</button>
               <input value={draft} onChange={(e) => handleDraftChange(e.target.value)} onKeyDown={(e) => {if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void sendMessage();}}} placeholder={uploading ? "Uploading…" : "Write a message…" } disabled={uploading || recording}/>
               <button className="send-button" onClick={() => void sendMessage()} disabled={!draft.trim() || uploading || recording}><Send size={18}/></button>
