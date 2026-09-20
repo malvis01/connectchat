@@ -236,7 +236,7 @@ export default function ChatPage() {
     if(!conversationId||!profile||!selected||call)return;
     try{
       const media=await navigator.mediaDevices.getUserMedia({audio:true,video:type==="video"});
-      const {data,rowError}=await supabase.from("calls").insert({conversation_id:conversationId,initiated_by:profile.id,call_type:type,status:"ringing"}).select("id").single();
+      const {data,error:rowError}=await supabase.from("calls").insert({conversation_id:conversationId,initiated_by:profile.id,call_type:type,status:"ringing"}).select("id").single();
       if(rowError||!data)throw rowError??new Error("Could not create call.");
       await supabase.from("call_participants").insert({call_id:data.id,user_id:profile.id,joined_at:new Date().toISOString()});
       const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
