@@ -456,3 +456,75 @@ create policy direct_conversations_select_member
 on public.direct_conversations for select
 to authenticated
 using (auth.uid() in (user_one, user_two));
+\n
+-- Private ConnectChat media bucket. Apply only to the dedicated ConnectChat Supabase project.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'connectchat-media',
+  'connectchat-media',
+  false,
+  26214400,
+  array[
+    'image/*',
+    'video/*',
+    'audio/*',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/plain'
+  ]
+)
+on conflict (id) do update set public = false, file_size_limit = 26214400;
+
+drop policy if exists connectchat_media_select_member on storage.objects;
+create policy connectchat_media_select_member
+on storage.objects for select
+to authenticated
+using (
+  bucket_id = 'connectchat-media'
+  and exists (
+    select 1
+    from public.conversation_members cm
+    where cm.conversation_id = split_part(name, '/', 1)::uuid
+      and cm.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists connectchat_media_insert_self on storage.objects;
+create policy connectchat_media_insert_self
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'connectchat-media'
+  and split_part(name, '/', 2)::uuid = (select auth.uid())
+  and exists (
+    select 1
+    from public.conversation_members cm
+    where cm.conversation_id = split_part(name, '/', 1)::uuid
+      and cm.user_id = (select auth.uid())
+  )
+);
+
+drop policy if exists connectchat_media_update_self on storage.objects;
+create policy connectchat_media_update_self
+on storage.objects for update
+to authenticated
+using (
+  bucket_id = 'connectchat-media'
+  and split_part(name, '/', 2)::uuid = (select auth.uid())
+)
+with check (
+  bucket_id = 'connectchat-media'
+  and split_part(name, '/', 2)::uuid = (select auth.uid())
+);
+
+drop policy if exists connectchat_media_delete_self on storage.objects;
+create policy connectchat_media_delete_self
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'connectchat-media'
+  and split_part(name, '/', 2)::uuid = (select auth.uid())
+);
