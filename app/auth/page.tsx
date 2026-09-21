@@ -55,37 +55,37 @@ export default function AuthPage() {
     setBusy(true);
 
     try {
+      const projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+      if (!projectUrl || !publishableKey) throw new Error("Missing Supabase configuration.");
+
       if (mode === "signup") {
-        const { data, error } = await supabase.auth.signUp({
-          phone: normalizedPhone,
-          password,
-          options: {
-            data: {
-              full_name: fullName.trim(),
-              username: normalizedUsername || null,
-            },
+        const response = await fetch(projectUrl + "/functions/v1/create-phone-account", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: publishableKey,
+            Authorization: "Bearer " + publishableKey,
           },
+          body: JSON.stringify({
+            phone: normalizedPhone,
+            password,
+            fullName: fullName.trim(),
+            username: normalizedUsername || null,
+          }),
         });
-
-        if (error) {
-          setMessage(error.message);
+        const result = await response.json();
+        if (!response.ok) {
+          setMessage(result.error || "Could not create your account.");
           return;
         }
 
-        if (!data.user || !data.session) {
-          setMessage("Account creation needs phone confirmation to be disabled in the ConnectChat Supabase project. No SMS/OTP is used in V1.");
-          return;
-        }
-
-        const { error: profileError } = await supabase.from("profiles").upsert({
-          id: data.user.id,
-          phone: normalizedPhone,
-          full_name: fullName.trim(),
-          username: normalizedUsername || null,
+        const { error: loginError } = await supabase.auth.signInWithPassword({
+          email: result.email,
+          password,
         });
-
-        if (profileError) {
-          setMessage(profileError.message);
+        if (loginError) {
+          setMessage(loginError.message);
           return;
         }
 
@@ -93,13 +93,15 @@ export default function AuthPage() {
         return;
       }
 
-      const { error } = await supabase.auth.signInWithPassword({
-        phone: normalizedPhone,
+      const encoded = btoa(normalizedPhone).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+      const email = `p_${encoded.toLowerCase()}@connectchat.invalid`;
+      const { error: loginError } = await supabase.auth.signInWithPassword({
+        email,
         password,
       });
 
-      if (error) {
-        setMessage(error.message);
+      if (loginError) {
+        setMessage("Invalid phone number or password.");
         return;
       }
 
