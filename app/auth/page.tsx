@@ -55,37 +55,37 @@ export default function AuthPage() {
     setBusy(true);
 
     try {
-      const projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-      if (!projectUrl || !publishableKey) throw new Error("Missing Supabase configuration.");
-
       if (mode === "signup") {
-        const response = await fetch(projectUrl + "/functions/v1/create-phone-account", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: publishableKey,
-            Authorization: "Bearer " + publishableKey,
+        const { data, error } = await supabase.auth.signUp({
+          phone: normalizedPhone,
+          password,
+          options: {
+            data: {
+              full_name: fullName.trim(),
+              username: normalizedUsername || null,
+            },
           },
-          body: JSON.stringify({
-            phone: normalizedPhone,
-            password,
-            fullName: fullName.trim(),
-            username: normalizedUsername || null,
-          }),
         });
-        const result = await response.json();
-        if (!response.ok) {
-          setMessage(result.error || "Could not create your account.");
+
+        if (error) {
+          setMessage(error.message);
           return;
         }
 
-        const { error: loginError } = await supabase.auth.signInWithPassword({
-          email: result.email,
-          password,
+        if (!data.user || !data.session) {
+          setMessage("Phone confirmation is enabled in Supabase. Disable phone confirmation to use ConnectChat without OTP or SMS.");
+          return;
+        }
+
+        const { error: profileError } = await supabase.from("profiles").upsert({
+          id: data.user.id,
+          phone: normalizedPhone,
+          full_name: fullName.trim(),
+          username: normalizedUsername || null,
         });
-        if (loginError) {
-          setMessage(loginError.message);
+
+        if (profileError) {
+          setMessage(profileError.message);
           return;
         }
 
@@ -93,10 +93,8 @@ export default function AuthPage() {
         return;
       }
 
-      const encoded = btoa(normalizedPhone).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-      const email = `p_${encoded.toLowerCase()}@connectchat.invalid`;
       const { error: loginError } = await supabase.auth.signInWithPassword({
-        email,
+        phone: normalizedPhone,
         password,
       });
 
@@ -107,7 +105,7 @@ export default function AuthPage() {
 
       window.location.href = "/chat";
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Registration failed. Please try again.");
+      setMessage(error instanceof Error ? error.message : "Authentication failed. Please try again.");
     } finally {
       setBusy(false);
     }
