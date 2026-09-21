@@ -15,7 +15,7 @@ function normalizePhone(value: string): string {
 
 function syntheticEmail(phone: string): string {
   const encoded = btoa(phone).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-  return `p_${encoded.toLowerCase()}@connectchat.invalid`;
+  return `p_${encoded.toLowerCase()}@qgsesjcpmvtykzzsleqx.supabase.co`;
 }
 
 export default function AuthPage() {
