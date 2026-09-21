@@ -6,6 +6,11 @@ import { supabase } from "@/lib/supabase-browser";
 
 type Mode = "login" | "signup";
 
+function syntheticEmail(phone: string): string {
+  const encoded = btoa(phone).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  return `p_${encoded.toLowerCase()}@connectchat.invalid`;
+}
+
 export default function AuthPage() {
   const [mode, setMode] = useState<Mode>("signup");
   const [phone, setPhone] = useState("");
@@ -20,18 +25,15 @@ export default function AuthPage() {
     event.preventDefault();
     setMessage("");
 
-    let normalizedPhone = phone.trim().replace(/[\s()-]/g, "");
-    if (/^0\d{10}$/.test(normalizedPhone)) {
-      normalizedPhone = "+234" + normalizedPhone.slice(1);
-    }
+    let normalizedPhone = phone.trim().replace(/[\\s()-]/g, "");
+    if (/^0\\d{10}$/.test(normalizedPhone)) normalizedPhone = "+234" + normalizedPhone.slice(1);
 
     const normalizedUsername = username.trim().replace(/^@+/, "").toLowerCase();
 
-    if (!/^\+[1-9]\d{7,14}$/.test(normalizedPhone)) {
+    if (!/^\\+[1-9]\\d{7,14}$/.test(normalizedPhone)) {
       setMessage("Enter your phone number in international format, for example +2348012345678.");
       return;
     }
-
     if (password.length < 8) {
       setMessage("Password must be at least 8 characters.");
       return;
@@ -55,46 +57,37 @@ export default function AuthPage() {
     setBusy(true);
 
     try {
+      const email = syntheticEmail(normalizedPhone);
+
       if (mode === "signup") {
-        const { data, error } = await supabase.auth.signUp({
-          phone: normalizedPhone,
-          password,
-          options: {
-            data: {
-              full_name: fullName.trim(),
-              username: normalizedUsername || null,
-            },
+        const projectUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+        if (!projectUrl || !publishableKey) throw new Error("Missing Supabase configuration.");
+
+        const response = await fetch(projectUrl + "/functions/v1/create-phone-account", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: publishableKey,
+            Authorization: "Bearer " + publishableKey,
           },
+          body: JSON.stringify({
+            phone: normalizedPhone,
+            password,
+            fullName: fullName.trim(),
+            username: normalizedUsername || null,
+          }),
         });
 
-        if (error) {
-          setMessage(error.message);
+        const result = await response.json();
+        if (!response.ok) {
+          setMessage(result.error || "Could not create your account.");
           return;
         }
-
-        if (!data.user || !data.session) {
-          setMessage("Phone confirmation is enabled in Supabase. Disable phone confirmation to use ConnectChat without OTP or SMS.");
-          return;
-        }
-
-        const { error: profileError } = await supabase.from("profiles").upsert({
-          id: data.user.id,
-          phone: normalizedPhone,
-          full_name: fullName.trim(),
-          username: normalizedUsername || null,
-        });
-
-        if (profileError) {
-          setMessage(profileError.message);
-          return;
-        }
-
-        window.location.href = "/chat";
-        return;
       }
 
       const { error: loginError } = await supabase.auth.signInWithPassword({
-        phone: normalizedPhone,
+        email,
         password,
       });
 
@@ -124,7 +117,7 @@ export default function AuthPage() {
 
         <div className="auth-heading">
           <h1>{mode === "signup" ? "Create your account" : "Welcome back"}</h1>
-          <p>Phone number and password only. No OTP or SMS verification in V1.</p>
+          <p>Phone number and password only. No OTP, SMS or Twilio.</p>
         </div>
 
         <form onSubmit={submit} className="auth-form">
