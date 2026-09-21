@@ -6,6 +6,13 @@ import { supabase } from "@/lib/supabase-browser";
 
 type Mode = "login" | "signup";
 
+function normalizePhone(value: string): string {
+  let phone = value.trim().replace(/[\s()-]/g, "");
+  if (/^0\d{10}$/.test(phone)) phone = "+234" + phone.slice(1);
+  if (/^234\d{10}$/.test(phone)) phone = "+" + phone;
+  return phone;
+}
+
 function syntheticEmail(phone: string): string {
   const encoded = btoa(phone).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   return `p_${encoded.toLowerCase()}@connectchat.invalid`;
@@ -25,13 +32,11 @@ export default function AuthPage() {
     event.preventDefault();
     setMessage("");
 
-    let normalizedPhone = phone.trim().replace(/[\\s()-]/g, "");
-    if (/^0\\d{10}$/.test(normalizedPhone)) normalizedPhone = "+234" + normalizedPhone.slice(1);
-
+    const normalizedPhone = normalizePhone(phone);
     const normalizedUsername = username.trim().replace(/^@+/, "").toLowerCase();
 
-    if (!/^\\+[1-9]\\d{7,14}$/.test(normalizedPhone)) {
-      setMessage("Enter your phone number in international format, for example +2348012345678.");
+    if (!/^\+[1-9]\d{7,14}$/.test(normalizedPhone)) {
+      setMessage("Enter a valid phone number, e.g. +2348012345678.");
       return;
     }
     if (password.length < 8) {
@@ -86,13 +91,10 @@ export default function AuthPage() {
         }
       }
 
-      const { error: loginError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { error: loginError } = await supabase.auth.signInWithPassword({ email, password });
 
       if (loginError) {
-        setMessage("Invalid phone number or password.");
+        setMessage(loginError.message || "Invalid phone number or password.");
         return;
       }
 
@@ -109,10 +111,7 @@ export default function AuthPage() {
       <section className="auth-card">
         <div className="auth-brand">
           <span className="auth-logo"><MessageCircle size={24} /></span>
-          <div>
-            <strong>ConnectChat</strong>
-            <span>Private communication</span>
-          </div>
+          <div><strong>ConnectChat</strong><span>Private communication</span></div>
         </div>
 
         <div className="auth-heading">
@@ -123,55 +122,18 @@ export default function AuthPage() {
         <form onSubmit={submit} className="auth-form">
           {mode === "signup" && (
             <>
-              <label>
-                <span>Full name</span>
-                <div className="auth-input">
-                  <UserRound size={18} />
-                  <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your full name" autoComplete="name" />
-                </div>
-              </label>
-
-              <label>
-                <span>Username <small>(optional)</small></span>
-                <div className="auth-input">
-                  <span className="auth-prefix">@</span>
-                  <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" autoComplete="username" />
-                </div>
-              </label>
+              <label><span>Full name</span><div className="auth-input"><UserRound size={18} /><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Your full name" autoComplete="name" /></div></label>
+              <label><span>Username <small>(optional)</small></span><div className="auth-input"><span className="auth-prefix">@</span><input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" autoComplete="username" /></div></label>
             </>
           )}
 
-          <label>
-            <span>Phone number</span>
-            <div className="auth-input">
-              <Phone size={18} />
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+2348012345678" inputMode="tel" autoComplete="tel" />
-            </div>
-          </label>
+          <label><span>Phone number</span><div className="auth-input"><Phone size={18} /><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+2348012345678" inputMode="tel" autoComplete="tel" /></div></label>
+          <label><span>Password</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete={mode === "signup" ? "new-password" : "current-password"} /></div></label>
 
-          <label>
-            <span>Password</span>
-            <div className="auth-input">
-              <LockKeyhole size={18} />
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete={mode === "signup" ? "new-password" : "current-password"} />
-            </div>
-          </label>
-
-          {mode === "signup" && (
-            <label>
-              <span>Confirm password</span>
-              <div className="auth-input">
-                <LockKeyhole size={18} />
-                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repeat your password" autoComplete="new-password" />
-              </div>
-            </label>
-          )}
+          {mode === "signup" && <label><span>Confirm password</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repeat your password" autoComplete="new-password" /></div></label>}
 
           {message && <p className="auth-message">{message}</p>}
-
-          <button className="auth-submit" disabled={busy}>
-            {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}
-          </button>
+          <button className="auth-submit" disabled={busy}>{busy ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}</button>
         </form>
 
         <button className="auth-switch" onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setMessage(""); }}>
