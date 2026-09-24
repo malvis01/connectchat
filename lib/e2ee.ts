@@ -10,6 +10,9 @@ function b64ToBytes(value: string) {
   const s = atob(value);
   return Uint8Array.from(s, (c) => c.charCodeAt(0));
 }
+function b64urlToBytes(value: string) {
+  return b64ToBytes(value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (value.length % 4)) % 4));
+}
 async function exportPublicKey(key: CryptoKey) {
   return bytesToB64(new Uint8Array(await crypto.subtle.exportKey("raw", key)));
 }
@@ -33,7 +36,7 @@ export async function ensureE2EEKeypair() {
   if (existing) {
     const privateKey = await crypto.subtle.importKey("jwk", JSON.parse(existing), { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
     const publicJwk = JSON.parse(existing);
-    return { privateKey, publicKey: bytesToB64(b64ToBytes(publicJwk.x)) };
+    return { privateKey, publicKey: bytesToB64(new Uint8Array([...b64urlToBytes(publicJwk.x), ...b64urlToBytes(publicJwk.y)])) };
   }
   const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
   const privateJwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
