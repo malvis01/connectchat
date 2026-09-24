@@ -408,8 +408,11 @@ export default function ChatPage() {
         const seconds = recordSeconds;
         setUploading(true);
         try {
-          const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}.webm`;
-          const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, blob, { contentType: mime, upsert: false });
+          const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}.webm.enc`;
+          if (!selected?.e2ee_public_key) throw new Error("Secure media is unavailable for this user.");
+          const mediaKey = await deriveSharedKey(selected.e2ee_public_key);
+          const encrypted = await encryptFile(new File([blob], "voice-message.webm", { type: mime }), mediaKey);
+          const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, encrypted, { contentType: "application/octet-stream", upsert: false });
           if (uploadError) throw uploadError;
           const { data: message, error: messageError } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: profile.id, message_type: "voice" }).select("id").single();
           if (messageError) throw messageError;
