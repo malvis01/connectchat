@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Phone, Play, Search, Send, Smile, Square, Sticker, UserRound, Video, X } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
-import { decryptText, encryptText, ensureE2EEKeypair } from "@/lib/e2ee";
+import { decryptText, encryptText, ensureE2EEKeypair, deriveSharedKey } from "@/lib/e2ee";
+import { decryptBlob, encryptFile } from "@/lib/e2ee-media";
 
 type Attachment = {
   id: string;
@@ -369,8 +370,11 @@ export default function ChatPage() {
         const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : DOC_TYPES.includes(file.type) ? "file" : null;
         if (!kind) throw new Error(`Unsupported file type: ${file.name}`);
         if (file.size > 50 * 1024 * 1024) throw new Error("Each file must be 50 MB or smaller.");
-        const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}-${safeName(file.name)}`;
-        const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, file, { contentType: file.type, upsert: false });
+        const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}-${safeName(file.name)}.enc`;
+        if (!selected?.e2ee_public_key) throw new Error("Secure media is unavailable for this user.");
+        const mediaKey = await deriveSharedKey(selected.e2ee_public_key);
+        const encrypted = await encryptFile(file, mediaKey);
+        const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, encrypted, { contentType: "application/octet-stream", upsert: false });
         if (uploadError) throw uploadError;
         const { data: message, error: messageError } = await supabase.from("messages").insert({
           conversation_id: conversationId, sender_id: profile.id, message_type: kind
@@ -426,8 +430,12 @@ export default function ChatPage() {
   }
 
   async function openAttachment(attachment: Attachment) {
-    try { window.open(await getSignedUrl(attachment.storage_path), "_blank", "noopener,noreferrer"); }
-    catch (e) { setError(e instanceof Error ? e.message : "Could not open file."); }
+    try {
+      if (!selected?.e2ee_public_key) throw new Error("Secure media key unavailable.");
+      const encrypted = await fetch(await getSignedUrl(attachment.storage_path)).then(r => r.blob());
+      const blob = await decryptBlob(encrypted, await deriveSharedKey(selected.e2ee_public_key));
+      window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not open file."); }
   }
 
   async function renderAttachment(attachment: Attachment) {
@@ -466,7 +474,7 @@ export default function ChatPage() {
                 {message.message_type === "sticker" && message.body ? <img src={message.body} alt="Sticker" className="message-sticker" /> : message.body && <div>{message.body}</div>}
                 {message.reactions.length > 0 && <div className="reaction-summary">{Object.entries(message.reactions.reduce<Record<string, number>>((a, r) => { a[r.emoji] = (a[r.emoji] ?? 0) + 1; return a; }, {})).map(([emoji, count]) => <button key={emoji} onClick={() => void toggleReaction(message.id, emoji)}>{emoji} {count}</button>)}</div>}
                 <div className="reaction-picker"><button title="Like" onClick={() => void toggleReaction(message.id, "👍")}>👍</button><button onClick={() => void toggleReaction(message.id, "❤️")}>❤️</button><button onClick={() => void toggleReaction(message.id, "😂")}>😂</button><button onClick={() => void toggleReaction(message.id, "🔥")}>🔥</button></div>
-                {message.attachments.map((attachment) => <AttachmentView key={attachment.id} attachment={attachment} onOpen={openAttachment} getUrl={getSignedUrl}/>)}
+                {message.attachments.map((attachment) => <AttachmentView key={attachment.id} attachment={attachment} onOpen={openAttachment} getUrl={getSignedUrl} publicKey={selected?.e2ee_public_key ?? null}/>)}
                 <time>{new Date(message.created_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</time>
               </div></div>;
             })}
