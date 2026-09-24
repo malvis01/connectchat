@@ -51,10 +51,12 @@ export async function listTrustedDevices(contactUserId: string) {
 }
 
 export async function trustE2EEDevice(contactUserId: string, deviceId: string, fingerprint: string) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("You must be signed in to verify a device.");
   const { data, error } = await supabase
     .from("e2ee_device_trust")
     .upsert({
-      contact_user_id: contactUserId, device_id: deviceId, fingerprint,
+      owner_user_id: user.id, contact_user_id: contactUserId, device_id: deviceId, fingerprint,
       verified_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     }, { onConflict: "owner_user_id,device_id" })
     .select("id,contact_user_id,device_id,fingerprint,verified_at,updated_at")
