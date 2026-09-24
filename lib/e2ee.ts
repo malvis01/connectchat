@@ -19,6 +19,10 @@ async function exportPublicKey(key: CryptoKey) {
 async function importPublicKey(value: string) {
   return crypto.subtle.importKey("raw", b64ToBytes(value), { name: "ECDH", namedCurve: "P-256" }, false, []);
 }
+export async function deriveSharedKey(publicKeyB64: string) {
+  const { privateKey } = await ensureE2EEKeypair();
+  return deriveKey(privateKey, publicKeyB64);
+}
 async function deriveKey(privateKey: CryptoKey, publicKeyB64: string) {
   const publicKey = await importPublicKey(publicKeyB64);
   const bits = await crypto.subtle.deriveBits({ name: "ECDH", public: publicKey }, privateKey, 256);
