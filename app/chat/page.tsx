@@ -367,8 +367,7 @@ export default function ChatPage() {
     setUploading(true); setError("");
     try {
       for (const file of selectedFiles) {
-        const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : DOC_TYPES.includes(file.type) ? "file" : null;
-        if (!kind) throw new Error(`Unsupported file type: ${file.name}`);
+        const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "voice" : "file";
         if (file.size > 50 * 1024 * 1024) throw new Error("Each file must be 50 MB or smaller.");
         const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}-${safeName(file.name)}.enc`;
         if (!selected?.e2ee_public_key) throw new Error("Secure media is unavailable for this user.");
