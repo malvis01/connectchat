@@ -502,10 +502,19 @@ export default function ChatPage() {
   );
 }
 
-function AttachmentView({attachment,onOpen,getUrl}:{attachment:Attachment;onOpen:(a:Attachment)=>void;getUrl:(path:string)=>Promise<string>}) {
+function AttachmentView({attachment,onOpen,getUrl,publicKey}:{attachment:Attachment;onOpen:(a:Attachment)=>void;getUrl:(path:string)=>Promise<string>;publicKey:string|null}) {
   const [url,setUrl]=useState("");
-  useEffect(()=>{let alive=true; void getUrl(attachment.storage_path).then((u)=>{if(alive)setUrl(u)}).catch(()=>{}); return()=>{alive=false}},[attachment.storage_path,getUrl]);
-  if (!url) return <div className="attachment-loading">Loading {attachment.file_name}…</div>;
+  useEffect(()=>{let alive=true;
+    void (async()=>{try{
+      if(!publicKey) return;
+      const encrypted=await fetch(await getUrl(attachment.storage_path)).then(r=>r.blob());
+      const plain=await decryptBlob(encrypted,await deriveSharedKey(publicKey));
+      const objectUrl=URL.createObjectURL(new Blob([plain],{type:attachment.mime_type}));
+      if(alive)setUrl(objectUrl); else URL.revokeObjectURL(objectUrl);
+    }catch{} })();
+    return()=>{alive=false;if(url)URL.revokeObjectURL(url)};
+  },[attachment.storage_path,attachment.mime_type,publicKey]);
+  if (!url) return <div className="attachment-loading">Decrypting {attachment.file_name}…</div>;
   if (attachment.mime_type.startsWith("image/")) return <img src={url} alt={attachment.file_name} className="message-image" onClick={()=>onOpen(attachment)}/>;
   if (attachment.mime_type.startsWith("video/")) return <video src={url} controls playsInline className="message-video"/>;
   if (attachment.mime_type.startsWith("audio/")) return <AudioMessage src={url} duration={attachment.duration_seconds}/>;
