@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
 import { decryptText, encryptText, ensureE2EEKeypair, deriveSharedKey } from "@/lib/e2ee";
 import { decryptBlob, encryptFile } from "@/lib/e2ee-media";
+import { registerE2EEDevice } from "@/lib/e2ee-key-management";
 
 type Attachment = {
   id: string;
@@ -123,6 +124,7 @@ export default function ChatPage() {
           await supabase.from("profiles").update({ e2ee_public_key: keys.publicKey }).eq("id", user.id);
           me.e2ee_public_key = keys.publicKey;
         }
+        await registerE2EEDevice(user.id);
         setE2eeReady(true);
         setProfile(me);
         await supabase.from("profiles").update({ is_online: true, last_seen_at: new Date().toISOString() }).eq("id", user.id);
