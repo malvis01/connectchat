@@ -36,7 +36,7 @@ export async function ensureE2EEKeypair() {
   if (existing) {
     const privateKey = await crypto.subtle.importKey("jwk", JSON.parse(existing), { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
     const publicJwk = JSON.parse(existing);
-    return { privateKey, publicKey: bytesToB64(new Uint8Array([...b64urlToBytes(publicJwk.x), ...b64urlToBytes(publicJwk.y)])) };
+    return { privateKey, publicKey: bytesToB64(new Uint8Array([4, ...b64urlToBytes(publicJwk.x), ...b64urlToBytes(publicJwk.y)])) };
   }
   const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
   const privateJwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
