@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Phone, Play, Search, Send, Smile, Square, Sticker, UserRound, Video, X } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
+import { decryptText, encryptText, ensureE2EEKeypair } from "@/lib/e2ee";
 
 type Attachment = {
   id: string;
@@ -104,6 +105,7 @@ export default function ChatPage() {
   const [cameraOff,setCameraOff]=useState(false);
   const [localStream,setLocalStream]=useState<MediaStream|null>(null);
   const [remoteStream,setRemoteStream]=useState<MediaStream|null>(null);
+  const [e2eeReady, setE2eeReady] = useState(false);
   const peerRef=useRef<RTCPeerConnection|null>(null);
   const callChannelRef=useRef<ReturnType<typeof supabase.channel>|null>(null);
   const callTimerRef=useRef<ReturnType<typeof setInterval>|null>(null);
@@ -115,6 +117,12 @@ export default function ChatPage() {
       if (!user) { window.location.href = "/auth"; return; }
       const { data: me } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
       if (mounted && me) {
+        const keys = await ensureE2EEKeypair();
+        if (me.e2ee_public_key !== keys.publicKey) {
+          await supabase.from("profiles").update({ e2ee_public_key: keys.publicKey }).eq("id", user.id);
+          me.e2ee_public_key = keys.publicKey;
+        }
+        setE2eeReady(true);
         setProfile(me);
         await supabase.from("profiles").update({ is_online: true, last_seen_at: new Date().toISOString() }).eq("id", user.id);
       }
@@ -289,7 +297,13 @@ export default function ChatPage() {
         .select("id,body,sender_id,message_type,created_at,edited_at").eq("conversation_id", id)
         .is("deleted_at", null).order("created_at", { ascending: true });
       if (readError) throw readError;
-      const loaded = await loadAttachments((data ?? []).map((m) => ({ ...m, attachments: [], reactions: [] })));
+      const decrypted = await Promise.all((data ?? []).map(async (m) => ({
+        ...m,
+        body: m.body && m.message_type === "text" && person.e2ee_public_key ? await decryptText(m.body, person.e2ee_public_key).catch(() => "🔒 Unable to decrypt this message") : m.body,
+        attachments: [],
+        reactions: [],
+      })));
+      const loaded = await loadAttachments(decrypted);
       setMessages(loaded);
       const reactionMap: Record<string, Reaction[]> = {};
       loaded.forEach((m) => { reactionMap[m.id] = m.reactions; });
@@ -299,7 +313,11 @@ export default function ChatPage() {
       const channel = supabase.channel(`chat:${id}`, { config: { presence: { key: profile?.id ?? "anonymous" } } });
       channel
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${id}` }, async (payload) => {
-          const message = payload.new as Message;
+          const raw = payload.new as Message;
+          const message = {
+            ...raw,
+            body: raw.body && raw.message_type === "text" && person.e2ee_public_key ? await decryptText(raw.body, person.e2ee_public_key).catch(() => "🔒 Unable to decrypt this message") : raw.body,
+          };
           const { data: attachments } = await supabase.from("message_attachments").select("*").eq("message_id", message.id);
           setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, { ...message, attachments: attachments ?? [], reactions: [] }]);
         })
@@ -335,7 +353,9 @@ export default function ChatPage() {
   async function sendMessage() {
     if (!conversationId || !profile || !draft.trim()) return;
     const body = draft.trim(); setDraft(""); void broadcastTyping(false);
-    const { error: sendError } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: profile.id, body, message_type: "text" });
+    if (!selected?.e2ee_public_key) { setDraft(body); setError("This user has not enabled secure messaging yet."); return; }
+    const encryptedBody = await encryptText(body, selected.e2ee_public_key);
+    const { error: sendError } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: profile.id, body: encryptedBody, message_type: "text" });
     if (sendError) { setDraft(body); setError(sendError.message); }
   }
 
