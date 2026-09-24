@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
 import { decryptText, encryptText, ensureE2EEKeypair, deriveSharedKey } from "@/lib/e2ee";
 import { decryptBlob, encryptFile } from "@/lib/e2ee-media";
-import { registerE2EEDevice } from "@/lib/e2ee-key-management";
+import { listContactDevices, listTrustedDevices, registerE2EEDevice, trustE2EEDevice } from "@/lib/e2ee-key-management";
 
 type Attachment = {
   id: string;
@@ -108,6 +108,10 @@ export default function ChatPage() {
   const [localStream,setLocalStream]=useState<MediaStream|null>(null);
   const [remoteStream,setRemoteStream]=useState<MediaStream|null>(null);
   const [e2eeReady, setE2eeReady] = useState(false);
+  const [contactDevices, setContactDevices] = useState<Array<{id:string;device_name:string;public_key:string;fingerprint:string;created_at:string;last_seen_at:string;revoked_at:string|null}>>([]);
+  const [trustedDevices, setTrustedDevices] = useState<Array<{id:string;contact_user_id:string;device_id:string;fingerprint:string;verified_at:string;updated_at:string}>>([]);
+  const [verificationWarning, setVerificationWarning] = useState("");
+  const [showVerification, setShowVerification] = useState(false);
   const peerRef=useRef<RTCPeerConnection|null>(null);
   const callChannelRef=useRef<ReturnType<typeof supabase.channel>|null>(null);
   const callTimerRef=useRef<ReturnType<typeof setInterval>|null>(null);
@@ -296,6 +300,14 @@ export default function ChatPage() {
     try {
       const id = await getOrCreateDirectConversation(supabase, person.id);
       setConversationId(id);
+      const [devices, trusted] = await Promise.all([listContactDevices(person.id), listTrustedDevices(person.id)]);
+      setContactDevices(devices);
+      setTrustedDevices(trusted);
+      const trustedByDevice = new Map(trusted.map((item) => [item.device_id, item.fingerprint]));
+      const changed = devices.some((device) => trustedByDevice.has(device.id) && trustedByDevice.get(device.id) !== device.fingerprint);
+      const newDevice = devices.some((device) => !trustedByDevice.has(device.id));
+      setVerificationWarning(changed ? "Security warning: this contact's encryption key changed on a trusted device. Verify the new fingerprint before trusting it." : newDevice ? "This contact has an unverified encryption device. Verify the fingerprint before trusting it." : "");
+      setShowVerification(false);
       const { data, error: readError } = await supabase.from("messages")
         .select("id,body,sender_id,message_type,created_at,edited_at").eq("conversation_id", id)
         .is("deleted_at", null).order("created_at", { ascending: true });
@@ -470,7 +482,26 @@ export default function ChatPage() {
       </aside>
       <section className="chat-panel">
         {!selected ? <div className="chat-empty"><MessageCircle size={42}/><h1>Start a private conversation</h1><p>Choose a person from the left to begin messaging in real time.</p></div> : <>
-          <header className="chat-header"><span className="person-avatar">{selected.full_name.slice(0,1).toUpperCase()}</span><div><strong>{selected.full_name}</strong><small>{typing ? "typing…" : otherOnline || selected.is_online ? "online" : "offline"}</small></div><div className="chat-call-actions"><button onClick={()=>void startCall("voice")} title="Voice call"><Phone size={18}/></button><button onClick={()=>void startCall("video")} title="Video call"><Video size={18}/></button></div></header>
+          <header className="chat-header"><span className="person-avatar">{selected.full_name.slice(0,1).toUpperCase()}</span><div><strong>{selected.full_name}</strong><small>{typing ? "typing…" : otherOnline || selected.is_online ? "online" : "offline"}</small></div><div className="chat-call-actions"><button onClick={() => setShowVerification((v) => !v)} title="Verify encryption">🔐</button><button onClick={()=>void startCall("voice")} title="Voice call"><Phone size={18}/></button><button onClick={()=>void startCall("video")} title="Video call"><Video size={18}/></button></div></header>
+          {verificationWarning && <div className="e2ee-warning">⚠️ {verificationWarning}</div>}
+          {showVerification && <div className="e2ee-verification">
+            <div><strong>Encryption verification</strong><button onClick={() => setShowVerification(false)}><X size={14}/></button></div>
+            <p>Compare this fingerprint with your contact through a trusted channel. Only mark a device verified when it matches.</p>
+            {contactDevices.length ? contactDevices.map((device) => {
+              const trusted = trustedDevices.find((item) => item.device_id === device.id && item.fingerprint === device.fingerprint);
+              return <div key={device.id} className="e2ee-device">
+                <div><strong>{device.device_name}</strong><small>{trusted ? "✓ Verified" : "Not verified"}</small></div>
+                <code>{device.fingerprint}</code>
+                {!trusted && <button onClick={async () => {
+                  try {
+                    const saved = await trustE2EEDevice(selected.id, device.id, device.fingerprint);
+                    setTrustedDevices((current) => [...current.filter((item) => item.device_id !== device.id), saved]);
+                    setVerificationWarning("");
+                  } catch (e) { setError(e instanceof Error ? e.message : "Could not verify device."); }
+                }}>Mark verified</button>}
+              </div>;
+            }) : <p>No active encryption devices found.</p>}
+          </div>}
           <div className="message-list">
             {messages.map((message) => {
               const mine = message.sender_id === profile?.id;
