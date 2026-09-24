@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
 import { decryptText, encryptText, ensureE2EEKeypair, deriveSharedKey } from "@/lib/e2ee";
 import { decryptBlob, encryptFile } from "@/lib/e2ee-media";
-import { listContactDevices, listTrustedDevices, registerE2EEDevice, trustE2EEDevice } from "@/lib/e2ee-key-management";
+import { listContactDevices, listTrustedDevices, registerE2EEDevice, rotateAndRegisterE2EEDevice, trustE2EEDevice } from "@/lib/e2ee-key-management";
 
 type Attachment = {
   id: string;
@@ -365,6 +365,18 @@ export default function ChatPage() {
     if (value.trim()) typingTimer.current = setTimeout(() => void broadcastTyping(false), 1200);
   }
 
+  async function rotateMyEncryptionKey() {
+    if (!profile) return;
+    try {
+      const result = await rotateAndRegisterE2EEDevice(profile.id);
+      await supabase.from("profiles").update({ e2ee_public_key: result.publicKey }).eq("id", profile.id);
+      setProfile((current) => current ? { ...current, e2ee_public_key: result.publicKey } : current);
+      setError("Encryption key rotated. Your previous keys remain locally available for older messages.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not rotate encryption key.");
+    }
+  }
+
   async function sendMessage() {
     if (!conversationId || !profile || !draft.trim()) return;
     const body = draft.trim(); setDraft(""); void broadcastTyping(false);
@@ -469,7 +481,7 @@ export default function ChatPage() {
       <aside className="chat-sidebar">
         <div className="chat-sidebar-header">
           <div className="auth-brand" style={{margin:0}}><span className="auth-logo"><MessageCircle size={21}/></span><div><strong>ConnectChat</strong><span>Private chats</span></div></div>
-          <button className="icon-button" title="Profile"><UserRound size={19}/></button>
+          <button className="icon-button" title="Rotate encryption key" onClick={() => void rotateMyEncryptionKey()}><UserRound size={19}/></button>
         </div>
         <div className="search-box"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search people by name, username or phone"/></div>
         <div className="people-list">
