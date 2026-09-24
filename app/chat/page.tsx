@@ -348,7 +348,7 @@ export default function ChatPage() {
       for (const file of selectedFiles) {
         const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : DOC_TYPES.includes(file.type) ? "file" : null;
         if (!kind) throw new Error(`Unsupported file type: ${file.name}`);
-        if (file.size > 25 * 1024 * 1024) throw new Error("Each file must be 25 MB or smaller.");
+        if (file.size > 50 * 1024 * 1024) throw new Error("Each file must be 50 MB or smaller.");
         const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}-${safeName(file.name)}`;
         const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, file, { contentType: file.type, upsert: false });
         if (uploadError) throw uploadError;
@@ -457,8 +457,8 @@ export default function ChatPage() {
           <div className="composer-wrap">
             {recording && <div className="recording-bar"><span className="recording-dot"/> Recording {recordSeconds}s <button onClick={stopRecording}>Send</button></div>}
             <div className="composer">
-              <label className="attach-button" title="Photos, videos or files"><Paperclip size={19}/><input type="file" multiple accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" onChange={(e) => { if (e.target.files) void sendFiles(e.target.files); e.currentTarget.value = ""; }}/></label>
-              <label className="attach-button mobile-photo" title="Photos and videos"><ImagePlus size={19}/><input type="file" multiple accept="image/*,video/*" onChange={(e) => { if (e.target.files) void sendFiles(e.target.files); e.currentTarget.value = ""; }}/></label>
+              <label className="attach-button" title="Attach any file"><Paperclip size={19}/><input type="file" multiple accept="*/*" onChange={(e) => { if (e.target.files) void sendFiles(e.target.files); e.currentTarget.value = ""; }}/></label>
+              <label className="attach-button mobile-photo" title="Attach photos or videos"><ImagePlus size={19}/><input type="file" multiple accept="image/*,video/*" onChange={(e) => { if (e.target.files) void sendFiles(e.target.files); e.currentTarget.value = ""; }}/></label>
               <button className="attach-button" title="Emoji" onClick={() => { setShowEmoji((v) => !v); setShowStickers(false); }}><Smile size={19}/></button>
               <button className="attach-button" title="Stickers" onClick={() => { setShowStickers((v) => !v); setShowEmoji(false); }}><Sticker size={19}/></button>
               <button className={`attach-button ${recording ? "recording" : ""}`} onClick={() => recording ? stopRecording() : void startRecording()} title={recording ? "Stop and send" : "Record voice"}>{recording ? <Square size={18}/> : <Mic size={19}/>}</button>
