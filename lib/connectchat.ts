@@ -6,6 +6,7 @@ export type Profile = {
   username: string | null;
   full_name: string;
   avatar_url: string | null;
+  e2ee_public_key?: string | null;
   about: string | null;
   is_online: boolean;
   last_seen_at: string | null;
