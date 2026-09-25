@@ -255,6 +255,8 @@ export default function ChatPage() {
       if(rowError||!data)throw rowError??new Error("Could not create call.");
       await supabase.from("call_participants").insert({call_id:data.id,user_id:profile.id,joined_at:new Date().toISOString()});
       const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+      const pendingIce: RTCIceCandidateInit[] = [];
+      let remoteDescriptionSet = false;
       media.getTracks().forEach(t=>pc.addTrack(t,media)); pc.ontrack=e=>setRemoteStream(e.streams[0]??null);
       const ch=supabase.channel("call:"+data.id);
       ch.on("broadcast",{event:"signal"},async({payload})=>{
@@ -264,10 +266,25 @@ export default function ChatPage() {
           await pc.setLocalDescription(offer);
           await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"offer",offer}});
         }
-        if(payload.type==="answer"){await pc.setRemoteDescription(payload.answer);await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",data.id);setCall(c=>c?{...c,status:"active"}:c);}
-        if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
+        if(payload.type==="answer"){
+          await pc.setRemoteDescription(payload.answer);
+          remoteDescriptionSet = true;
+          for(const candidate of pendingIce.splice(0)) await pc.addIceCandidate(candidate);
+          await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",data.id);
+          setCall(c=>c?{...c,status:"active"}:c);
+        }
+        if(payload.type==="ice"&&payload.candidate){
+          if(remoteDescriptionSet) await pc.addIceCandidate(payload.candidate);
+          else pendingIce.push(payload.candidate);
+        }
         if(payload.type==="decline"||payload.type==="hangup")await endCall(payload.type==="decline"?"declined":"ended",false);
-      }).subscribe();
+      });
+      await new Promise<void>((resolve,reject)=>{
+        ch.subscribe(status=>{
+          if(status==="SUBSCRIBED") resolve();
+          else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT") reject(new Error("Call signaling channel failed to connect."));
+        });
+      });
       const invite=supabase.channel(`user-call:${selected.id}`);
       invite.subscribe(async status=>{if(status==="SUBSCRIBED"){await invite.send({type:"broadcast",event:"invite",payload:{from:profile.id,callId:data.id,callType:type,conversationId}});setTimeout(()=>{void supabase.removeChannel(invite)},5000);}});
       pc.onicecandidate=e=>{if(e.candidate)void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ice",candidate:e.candidate}})};
@@ -280,14 +297,35 @@ export default function ChatPage() {
     try{
       const media=await navigator.mediaDevices.getUserMedia({audio:true,video:type==="video"});
       const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+      const pendingIce: RTCIceCandidateInit[] = [];
+      let remoteDescriptionSet = false;
       media.getTracks().forEach(t=>pc.addTrack(t,media)); pc.ontrack=e=>setRemoteStream(e.streams[0]??null);
       const ch=supabase.channel("call:"+callId);
       ch.on("broadcast",{event:"signal"},async({payload})=>{
         if(payload?.from===profile.id)return;
-        if(payload.type==="offer"){await pc.setRemoteDescription(payload.offer);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"answer",answer}});await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",callId);}
-        if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
+        if(payload.type==="offer"){
+          await pc.setRemoteDescription(payload.offer);
+          remoteDescriptionSet = true;
+          for(const candidate of pendingIce.splice(0)) await pc.addIceCandidate(candidate);
+          const answer=await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"answer",answer}});
+          await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",callId);
+        }
+        if(payload.type==="ice"){
+          if(!payload.candidate)return;
+          if(remoteDescriptionSet) await pc.addIceCandidate(payload.candidate);
+          else pendingIce.push(payload.candidate);
+        }
         if(payload.type==="hangup")await endCall("ended",false);
-      }).subscribe(async status=>{if(status==="SUBSCRIBED"){await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ready"}});}});
+      });
+      await new Promise<void>((resolve,reject)=>{
+        ch.subscribe(status=>{
+          if(status==="SUBSCRIBED"){
+            void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ready"}}).then(()=>resolve());
+          } else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT") reject(new Error("Call signaling channel failed to connect."));
+        });
+      });
       pc.onicecandidate=e=>{if(e.candidate)void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ice",candidate:e.candidate}})};
       await supabase.from("call_participants").upsert({call_id:callId,user_id:profile.id,joined_at:new Date().toISOString()});
       setLocalStream(media);setCall(c=>c?{...c,status:"active"}:c);callChannelRef.current=ch;peerRef.current=pc;
