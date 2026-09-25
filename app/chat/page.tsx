@@ -416,12 +416,19 @@ export default function ChatPage() {
         const { data: message, error: messageError } = await supabase.from("messages").insert({
           conversation_id: conversationId, sender_id: profile.id, message_type: kind
         }).select("id").single();
-        if (messageError) throw messageError;
+        if (messageError) {
+          await supabase.storage.from("connectchat-media").remove([path]);
+          throw messageError;
+        }
         const { error: attachmentError } = await supabase.from("message_attachments").insert({
           message_id: message.id, storage_path: path, file_name: file.name, mime_type: file.type || "application/octet-stream",
           file_size: file.size, width: kind === "image" ? undefined : null, height: kind === "image" ? undefined : null
         });
-        if (attachmentError) throw attachmentError;
+        if (attachmentError) {
+          await supabase.from("messages").delete().eq("id", message.id);
+          await supabase.storage.from("connectchat-media").remove([path]);
+          throw attachmentError;
+        }
       }
     } catch (e) { setError(e instanceof Error ? e.message : "Upload failed."); }
     finally { setUploading(false); }
@@ -451,9 +458,16 @@ export default function ChatPage() {
           const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, encrypted, { contentType: "application/octet-stream", upsert: false });
           if (uploadError) throw uploadError;
           const { data: message, error: messageError } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: profile.id, message_type: "voice" }).select("id").single();
-          if (messageError) throw messageError;
+          if (messageError) {
+            await supabase.storage.from("connectchat-media").remove([path]);
+            throw messageError;
+          }
           const { error: attachmentError } = await supabase.from("message_attachments").insert({ message_id: message.id, storage_path: path, file_name: "voice-message.webm", mime_type: mime, file_size: blob.size, duration_seconds: seconds });
-          if (attachmentError) throw attachmentError;
+          if (attachmentError) {
+            await supabase.from("messages").delete().eq("id", message.id);
+            await supabase.storage.from("connectchat-media").remove([path]);
+            throw attachmentError;
+          }
         } catch (e) { setError(e instanceof Error ? e.message : "Voice upload failed."); }
         finally { setUploading(false); }
       };
@@ -468,12 +482,17 @@ export default function ChatPage() {
     if (recordTimer.current) { clearInterval(recordTimer.current); recordTimer.current = null; }
   }
 
-  async function openAttachment(attachment: Attachment) {
+  async function openAttachment(attachment: Attachment, senderPublicKey?: string | null) {
     try {
       if (!selected?.e2ee_public_key) throw new Error("Secure media key unavailable.");
-      const encrypted = await fetch(await getSignedUrl(attachment.storage_path)).then(r => r.blob());
-      const blob = await decryptBlob(encrypted, selected.e2ee_public_key);
-      window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
+      const response = await fetch(await getSignedUrl(attachment.storage_path));
+      if (!response.ok) throw new Error("Could not download encrypted media.");
+      const encrypted = await response.blob();
+      const blob = await decryptBlob(encrypted, senderPublicKey ?? selected.e2ee_public_key);
+      const objectUrl = URL.createObjectURL(blob);
+      const opened = window.open(objectUrl, "_blank", "noopener,noreferrer");
+      if (!opened) URL.revokeObjectURL(objectUrl);
+      else window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not open file."); }
   }
 
@@ -560,7 +579,7 @@ export default function ChatPage() {
   );
 }
 
-function AttachmentView({attachment,onOpen,getUrl,publicKey,senderPublicKey}:{attachment:Attachment;onOpen:(a:Attachment)=>void;getUrl:(path:string)=>Promise<string>;publicKey:string|null;senderPublicKey:string|null}) {
+function AttachmentView({attachment,onOpen,getUrl,publicKey,senderPublicKey}:{attachment:Attachment;onOpen:(a:Attachment,senderPublicKey?:string|null)=>void;getUrl:(path:string)=>Promise<string>;publicKey:string|null;senderPublicKey:string|null}) {
   const [url,setUrl]=useState("");
   useEffect(()=>{
     let alive=true;
@@ -569,7 +588,9 @@ function AttachmentView({attachment,onOpen,getUrl,publicKey,senderPublicKey}:{at
     void (async()=>{
       try{
         if(!publicKey) return;
-        const encrypted=await fetch(await getUrl(attachment.storage_path)).then(r=>r.blob());
+        const response=await fetch(await getUrl(attachment.storage_path));
+        if(!response.ok) throw new Error("Could not download encrypted media.");
+        const encrypted=await response.blob();
         const plain=await decryptBlob(encrypted, senderPublicKey ?? undefined);
         objectUrl=URL.createObjectURL(new Blob([plain],{type:attachment.mime_type}));
         if(alive) setUrl(objectUrl);
@@ -582,8 +603,8 @@ function AttachmentView({attachment,onOpen,getUrl,publicKey,senderPublicKey}:{at
     };
   },[attachment.storage_path,attachment.mime_type,publicKey,senderPublicKey,getUrl]);
   if (!url) return <div className="attachment-loading">Decrypting {attachment.file_name}…</div>;
-  if (attachment.mime_type.startsWith("image/")) return <img src={url} alt={attachment.file_name} className="message-image" onClick={()=>onOpen(attachment)}/>;
+  if (attachment.mime_type.startsWith("image/")) return <img src={url} alt={attachment.file_name} className="message-image" onClick={()=>onOpen(attachment,senderPublicKey)}/>;
   if (attachment.mime_type.startsWith("video/")) return <video src={url} controls playsInline className="message-video"/>;
   if (attachment.mime_type.startsWith("audio/")) return <AudioMessage src={url} duration={attachment.duration_seconds}/>;
-  return <button className="file-card" onClick={()=>onOpen(attachment)}><FileText size={24}/><span><strong>{attachment.file_name}</strong><small>{formatSize(attachment.file_size)} · Open</small></span></button>;
+  return <button className="file-card" onClick={()=>onOpen(attachment,senderPublicKey)}><FileText size={24}/><span><strong>{attachment.file_name}</strong><small>{formatSize(attachment.file_size)} · Open</small></span></button>;
 }
