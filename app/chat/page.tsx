@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Phone, Play, Search, Send, Smile, Square, Sticker, UserRound, Video, X } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
-import { decryptText, encryptText, ensureE2EEKeypair, deriveSharedKey } from "@/lib/e2ee";
+import { decryptText, encryptText, ensureE2EEKeypair } from "@/lib/e2ee";
 import { decryptBlob, encryptFile } from "@/lib/e2ee-media";
 import { listContactDevices, listTrustedDevices, registerE2EEDevice, rotateAndRegisterE2EEDevice, trustE2EEDevice } from "@/lib/e2ee-key-management";
 
@@ -410,8 +410,7 @@ export default function ChatPage() {
         if (file.size > 50 * 1024 * 1024) throw new Error("Each file must be 50 MB or smaller.");
         const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}-${safeName(file.name)}.enc`;
         if (!selected?.e2ee_public_key) throw new Error("Secure media is unavailable for this user.");
-        const mediaKey = await deriveSharedKey(selected.e2ee_public_key);
-        const encrypted = await encryptFile(file, mediaKey);
+        const encrypted = await encryptFile(file, selected.e2ee_public_key);
         const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, encrypted, { contentType: "application/octet-stream", upsert: false });
         if (uploadError) throw uploadError;
         const { data: message, error: messageError } = await supabase.from("messages").insert({
@@ -448,8 +447,7 @@ export default function ChatPage() {
         try {
           const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}.webm.enc`;
           if (!selected?.e2ee_public_key) throw new Error("Secure media is unavailable for this user.");
-          const mediaKey = await deriveSharedKey(selected.e2ee_public_key);
-          const encrypted = await encryptFile(new File([blob], "voice-message.webm", { type: mime }), mediaKey);
+          const encrypted = await encryptFile(new File([blob], "voice-message.webm", { type: mime }), selected.e2ee_public_key);
           const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, encrypted, { contentType: "application/octet-stream", upsert: false });
           if (uploadError) throw uploadError;
           const { data: message, error: messageError } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: profile.id, message_type: "voice" }).select("id").single();
@@ -474,7 +472,7 @@ export default function ChatPage() {
     try {
       if (!selected?.e2ee_public_key) throw new Error("Secure media key unavailable.");
       const encrypted = await fetch(await getSignedUrl(attachment.storage_path)).then(r => r.blob());
-      const blob = await decryptBlob(encrypted, await deriveSharedKey(selected.e2ee_public_key));
+      const blob = await decryptBlob(encrypted, selected.e2ee_public_key);
       window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not open file."); }
   }
