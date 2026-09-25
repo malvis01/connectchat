@@ -383,7 +383,7 @@ export default function ChatPage() {
     try {
       const result = await rotateAndRegisterE2EEDevice(profile.id);
       await supabase.from("profiles").update({ e2ee_public_key: result.public_key }).eq("id", profile.id);
-      setProfile((current) => current ? { ...current, e2ee_public_key: result.publicKey } : current);
+      setProfile((current) => current ? { ...current, e2ee_public_key: result.public_key } : current);
       setError("Encryption key rotated. Your previous keys remain locally available for older messages.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not rotate encryption key.");
