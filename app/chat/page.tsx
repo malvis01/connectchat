@@ -333,8 +333,21 @@ export default function ChatPage() {
             ...raw,
             body: raw.body && raw.message_type === "text" && person.e2ee_public_key ? await decryptText(raw.body, person.e2ee_public_key).catch(() => "🔒 Unable to decrypt this message") : raw.body,
           };
-          const { data: attachments } = await supabase.from("message_attachments").select("*").eq("message_id", message.id);
-          setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, { ...message, attachments: attachments ?? [], reactions: [] }]);
+          // Attachment rows are created immediately after the message row. Realtime can
+          // deliver the message INSERT before the attachment INSERT is visible, so retry
+          // briefly instead of showing a permanent attachment-less message.
+          let attachments: Attachment[] = [];
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            const { data } = await supabase.from("message_attachments").select("*").eq("message_id", message.id);
+            attachments = (data ?? []) as Attachment[];
+            if (attachments.length || message.message_type === "text" || message.message_type === "sticker") break;
+            await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+          }
+          setMessages((current) => current.some((item) => item.id === message.id)
+            ? current.map((item) => item.id === message.id && item.attachments.length === 0 && attachments.length
+              ? { ...item, attachments }
+              : item)
+            : [...current, { ...message, attachments, reactions: [] }]);
         })
         .on("broadcast", { event: "typing" }, ({ payload }) => { if (payload?.userId === person.id) setTyping(Boolean(payload.isTyping)); })
         .on("broadcast", { event: "reaction" }, ({ payload }) => {
