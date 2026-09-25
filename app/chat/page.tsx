@@ -532,7 +532,7 @@ export default function ChatPage() {
                 {message.message_type === "sticker" && message.body ? <img src={message.body} alt="Sticker" className="message-sticker" /> : message.body && <div>{message.body}</div>}
                 {message.reactions.length > 0 && <div className="reaction-summary">{Object.entries(message.reactions.reduce<Record<string, number>>((a, r) => { a[r.emoji] = (a[r.emoji] ?? 0) + 1; return a; }, {})).map(([emoji, count]) => <button key={emoji} onClick={() => void toggleReaction(message.id, emoji)}>{emoji} {count}</button>)}</div>}
                 <div className="reaction-picker"><button title="Like" onClick={() => void toggleReaction(message.id, "👍")}>👍</button><button onClick={() => void toggleReaction(message.id, "❤️")}>❤️</button><button onClick={() => void toggleReaction(message.id, "😂")}>😂</button><button onClick={() => void toggleReaction(message.id, "🔥")}>🔥</button></div>
-                {message.attachments.map((attachment) => <AttachmentView key={attachment.id} attachment={attachment} onOpen={openAttachment} getUrl={getSignedUrl} publicKey={selected?.e2ee_public_key ?? null}/>)}
+                {message.attachments.map((attachment) => <AttachmentView key={attachment.id} attachment={attachment} onOpen={openAttachment} getUrl={getSignedUrl} publicKey={selected?.e2ee_public_key ?? null} senderPublicKey={mine ? profile?.e2ee_public_key ?? null : selected?.e2ee_public_key ?? null}/>)}
                 <time>{new Date(message.created_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</time>
               </div></div>;
             })}
@@ -560,18 +560,27 @@ export default function ChatPage() {
   );
 }
 
-function AttachmentView({attachment,onOpen,getUrl,publicKey}:{attachment:Attachment;onOpen:(a:Attachment)=>void;getUrl:(path:string)=>Promise<string>;publicKey:string|null}) {
+function AttachmentView({attachment,onOpen,getUrl,publicKey,senderPublicKey}:{attachment:Attachment;onOpen:(a:Attachment)=>void;getUrl:(path:string)=>Promise<string>;publicKey:string|null;senderPublicKey:string|null}) {
   const [url,setUrl]=useState("");
-  useEffect(()=>{let alive=true;
-    void (async()=>{try{
-      if(!publicKey) return;
-      const encrypted=await fetch(await getUrl(attachment.storage_path)).then(r=>r.blob());
-      const plain=await decryptBlob(encrypted,await deriveSharedKey(publicKey));
-      const objectUrl=URL.createObjectURL(new Blob([plain],{type:attachment.mime_type}));
-      if(alive)setUrl(objectUrl); else URL.revokeObjectURL(objectUrl);
-    }catch{} })();
-    return()=>{alive=false;if(url)URL.revokeObjectURL(url)};
-  },[attachment.storage_path,attachment.mime_type,publicKey]);
+  useEffect(()=>{
+    let alive=true;
+    let objectUrl="";
+    setUrl("");
+    void (async()=>{
+      try{
+        if(!publicKey) return;
+        const encrypted=await fetch(await getUrl(attachment.storage_path)).then(r=>r.blob());
+        const plain=await decryptBlob(encrypted, senderPublicKey ?? undefined);
+        objectUrl=URL.createObjectURL(new Blob([plain],{type:attachment.mime_type}));
+        if(alive) setUrl(objectUrl);
+        else URL.revokeObjectURL(objectUrl);
+      }catch{}
+    })();
+    return()=>{
+      alive=false;
+      if(objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  },[attachment.storage_path,attachment.mime_type,publicKey,senderPublicKey,getUrl]);
   if (!url) return <div className="attachment-loading">Decrypting {attachment.file_name}…</div>;
   if (attachment.mime_type.startsWith("image/")) return <img src={url} alt={attachment.file_name} className="message-image" onClick={()=>onOpen(attachment)}/>;
   if (attachment.mime_type.startsWith("video/")) return <video src={url} controls playsInline className="message-video"/>;
