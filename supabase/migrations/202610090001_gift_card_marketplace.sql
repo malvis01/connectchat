@@ -113,12 +113,39 @@ with check (seller_id = (select auth.uid()) and status in ('draft','pending_revi
 drop policy if exists gift_card_order_read_participant on public.gift_card_orders;
 create policy gift_card_order_read_participant on public.gift_card_orders
 for select to authenticated using (buyer_id = (select auth.uid()) or seller_id = (select auth.uid()));
+-- Orders are created atomically through this RPC to prevent two buyers reserving the same card.
 drop policy if exists gift_card_order_create_buyer on public.gift_card_orders;
-create policy gift_card_order_create_buyer on public.gift_card_orders
-for insert to authenticated with check (
-  buyer_id = (select auth.uid()) and buyer_id <> seller_id and status = 'awaiting_payment'
-  and exists (select 1 from public.gift_card_listings l where l.id = listing_id and l.seller_id = seller_id and l.status = 'active' and l.asking_price = amount and l.currency = currency)
-);
+create or replace function public.create_gift_card_order(p_listing_id uuid, p_idempotency_key uuid default gen_random_uuid())
+returns public.gift_card_orders
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $
+declare
+  v_buyer uuid := auth.uid();
+  v_listing public.gift_card_listings%rowtype;
+  v_order public.gift_card_orders%rowtype;
+begin
+  if v_buyer is null then raise exception 'Sign in to place an order.' using errcode = '28000'; end if;
+  select * into v_order from public.gift_card_orders where idempotency_key = p_idempotency_key;
+  if found then
+    if v_order.buyer_id <> v_buyer then raise exception 'Idempotency key belongs to another account.'; end if;
+    return v_order;
+  end if;
+  select * into v_listing from public.gift_card_listings where id = p_listing_id for update;
+  if not found or v_listing.status <> 'active' then raise exception 'This gift card is no longer available.'; end if;
+  if v_listing.seller_id = v_buyer then raise exception 'You cannot buy your own listing.'; end if;
+  insert into public.gift_card_orders(listing_id,buyer_id,seller_id,currency,amount,status,idempotency_key)
+  values (v_listing.id,v_buyer,v_listing.seller_id,v_listing.currency,v_listing.asking_price,'awaiting_payment',p_idempotency_key)
+  returning * into v_order;
+  update public.gift_card_listings set status = 'reserved', updated_at = now() where id = v_listing.id;
+  insert into public.gift_card_audit_events(actor_id,entity_type,entity_id,action,metadata)
+  values (v_buyer,'gift_card_order',v_order.id,'order_created',jsonb_build_object('listing_id',v_listing.id,'amount',v_listing.asking_price,'currency',v_listing.currency));
+  return v_order;
+end;
+$;
+revoke all on function public.create_gift_card_order(uuid, uuid) from public, anon;
+grant execute on function public.create_gift_card_order(uuid, uuid) to authenticated;
 
 drop policy if exists gift_card_delivery_read_buyer_seller on public.gift_card_deliveries;
 create policy gift_card_delivery_read_buyer_seller on public.gift_card_deliveries
