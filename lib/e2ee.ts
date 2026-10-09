@@ -122,11 +122,21 @@ export async function decryptText(value: string, senderPublicKey: string) {
   }
   if (!value.startsWith(PREFIX_V2)) return value;
   const envelope = JSON.parse(value.slice(PREFIX_V2.length)) as { sender: string; recipient: string; iv: string; data: string };
+  if (!envelope.sender || !envelope.recipient || !envelope.iv || !envelope.data) {
+    throw new Error("Invalid encrypted message.");
+  }
   const keys = await getStoredE2EEKeys();
   for (const stored of [...keys].reverse()) {
-    if (stored.publicKey !== envelope.recipient) continue;
+    // Both participants can decrypt: the recipient uses sender's public key;
+    // the sender uses recipient's public key to reopen their own sent history.
+    const peerPublicKey = stored.publicKey === envelope.recipient
+      ? envelope.sender
+      : stored.publicKey === envelope.sender
+        ? envelope.recipient
+        : null;
+    if (!peerPublicKey) continue;
     const privateKey = await crypto.subtle.importKey("jwk", stored.privateJwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
-    const key = await deriveKey(privateKey, envelope.sender, "v2");
+    const key = await deriveKey(privateKey, peerPublicKey, "v2");
     try {
       const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64ToBytes(envelope.iv) }, key, b64ToBytes(envelope.data));
       return new TextDecoder().decode(plain);
