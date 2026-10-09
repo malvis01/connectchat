@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { MessageCircle, Phone, Video, ShieldCheck } from "lucide-react";
+import { MessageCircle, Phone, Video, ShieldCheck, CreditCard } from "lucide-react";
 
 const features = [
   ["Private chats", MessageCircle, "One-to-one messaging with real-time delivery."],
   ["Voice calls", Phone, "Private audio calls designed for mobile networks."],
   ["Video calls", Video, "Simple one-to-one video communication."],
-  ["Private by design", ShieldCheck, "No public feed, stories, status or business features in V1."],
+  ["Private by design", ShieldCheck, "No public feed, stories, status or unwanted social clutter."],
+  ["Gift card marketplace", CreditCard, "Browse moderated listings and track gift card order reservations."],
 ] as const;
 
 export default function Home() {
@@ -24,6 +25,7 @@ export default function Home() {
         </div>
         <div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:24}}>
           <Link href="/auth" style={{background:"#101828",color:"#fff",padding:"12px 18px",borderRadius:12,fontWeight:800}}>Create account / Log in</Link>
+          <Link href="/gift-cards" style={{background:"#eef2ff",color:"#3730a3",padding:"12px 18px",borderRadius:12,fontWeight:800}}>Gift card marketplace</Link>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:14}}>
           {features.map(([title,Icon,description])=>(
