@@ -30,7 +30,7 @@ async function deriveKey(privateKey: CryptoKey, publicKeyB64: string, version = 
   return crypto.subtle.deriveKey(
     { name: "HKDF", hash: "SHA-256", salt: new TextEncoder().encode(label), info: new TextEncoder().encode("direct-message") },
     await crypto.subtle.importKey("raw", bits, "HKDF", false, ["deriveKey"]),
-    { name: "HKDF", hash: "SHA-256", salt: new TextEncoder().encode(label), info: new TextEncoder().encode("direct-message") },
+    { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"],
   );
