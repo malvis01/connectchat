@@ -104,7 +104,7 @@ create policy gift_card_listing_read on public.gift_card_listings
 for select to authenticated using (status = 'active' or seller_id = (select auth.uid()));
 drop policy if exists gift_card_listing_insert on public.gift_card_listings;
 create policy gift_card_listing_insert on public.gift_card_listings
-for insert to authenticated with check (seller_id = (select auth.uid()) and status in ('draft','pending_review'));
+for insert to authenticated with check (seller_id = (select auth.uid()) and status in ('draft','pending_review') and exists (select 1 from public.gift_card_seller_profiles s where s.user_id = (select auth.uid()) and s.verification_status in ('pending','verified')));
 drop policy if exists gift_card_listing_update on public.gift_card_listings;
 create policy gift_card_listing_update on public.gift_card_listings
 for update to authenticated using (seller_id = (select auth.uid()) and status in ('draft','pending_review','rejected'))
@@ -120,7 +120,7 @@ returns public.gift_card_orders
 language plpgsql
 security definer
 set search_path = public, pg_temp
-as $
+as $function$
 declare
   v_buyer uuid := auth.uid();
   v_listing public.gift_card_listings%rowtype;
@@ -143,7 +143,7 @@ begin
   values (v_buyer,'gift_card_order',v_order.id,'order_created',jsonb_build_object('listing_id',v_listing.id,'amount',v_listing.asking_price,'currency',v_listing.currency));
   return v_order;
 end;
-$;
+$function$;
 revoke all on function public.create_gift_card_order(uuid, uuid) from public, anon;
 grant execute on function public.create_gift_card_order(uuid, uuid) to authenticated;
 
