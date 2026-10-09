@@ -22,6 +22,7 @@ const panelStyle: React.CSSProperties = { background: "#fff", border: "1px solid
 
 export default function GiftCardsPage() {
   const [userId, setUserId] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
   const [listings, setListings] = useState<Listing[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [sellerProfiles, setSellerProfiles] = useState<Record<string, SellerProfile>>({});
@@ -49,6 +50,8 @@ export default function GiftCardsPage() {
       if (authError) throw authError;
       if (!user) { window.location.href = "/auth"; return; }
       setUserId(user.id);
+      const { data: adminFlag } = await supabase.rpc("is_gift_card_marketplace_admin");
+      setIsAdmin(adminFlag === true);
       const [listingResult, orderResult] = await Promise.all([
         supabase.from("gift_card_listings").select("id,seller_id,brand,country_code,currency,denomination,asking_price,card_type,description,status,created_at").in("status", ["active", "reserved"]).order("created_at", { ascending: false }),
         supabase.from("gift_card_orders").select("id,listing_id,buyer_id,seller_id,currency,amount,status,created_at").order("created_at", { ascending: false }).limit(100),
@@ -128,6 +131,7 @@ export default function GiftCardsPage() {
         <div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}><span style={{ display: "grid", placeItems: "center", width: 44, height: 44, borderRadius: 14, background: "#e0e7ff" }}><CreditCard size={24}/></span><div><h1 style={{ margin: 0, fontSize: 28 }}>Gift Card Marketplace</h1><p style={{ margin: "5px 0 0", color: "#667085" }}>Buy and list gift cards with moderation and order tracking.</p></div></div>
         </div>
+        {isAdmin && <Link href="/gift-cards/admin" style={{ ...buttonStyle, background: "#eef2ff", color: "#3730a3", textDecoration: "none" }}>Marketplace admin</Link>}
         <button style={{ ...buttonStyle, background: "#fff", color: "#344054", border: "1px solid #d0d5dd" }} onClick={() => void load()}><RefreshCw size={16}/> Refresh</button>
       </header>
 
