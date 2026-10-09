@@ -74,10 +74,10 @@ export default function GiftCardsPage() {
     event.preventDefault(); setBusy(true); setNotice(""); setError("");
     try {
       if (!userId) throw new Error("Sign in before registering as a seller.");
-      const { error: saveError } = await supabase.from("gift_card_seller_profiles").upsert({
+      const { error: saveError } = await supabase.from("gift_card_seller_profiles").insert({
         user_id: userId, business_name: businessName.trim(), country_code: sellerCountry.toUpperCase(),
         contact_email: contactEmail.trim() || null, verification_status: "pending",
-      }, { onConflict: "user_id" });
+      });
       if (saveError) throw saveError;
       setNotice("Seller application saved. Your account is pending verification; listings will require marketplace review before buyers can see them.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not submit seller application."); }
