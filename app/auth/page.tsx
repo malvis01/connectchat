@@ -7,9 +7,16 @@ import { supabase } from "@/lib/supabase-browser";
 type Mode = "login" | "signup";
 
 function normalizePhone(value: string): string {
-  let phone = value.trim().replace(/[\s()-]/g, "");
+  let phone = value.trim().replace(/[\s().-]/g, "");
+
+  // Support the international dialing prefix 00 as well as +.
+  if (phone.startsWith("00")) phone = "+" + phone.slice(2);
+
+  // Keep convenient Nigerian local-number support while accepting every
+  // other country through its international country calling code.
   if (/^0\d{10}$/.test(phone)) phone = "+234" + phone.slice(1);
   if (/^234\d{10}$/.test(phone)) phone = "+" + phone;
+
   return phone;
 }
 
@@ -36,7 +43,7 @@ export default function AuthPage() {
     const normalizedUsername = username.trim().replace(/^@+/, "").toLowerCase();
 
     if (!/^\+[1-9]\d{7,14}$/.test(normalizedPhone)) {
-      setMessage("Enter a valid phone number, e.g. +2348012345678.");
+      setMessage("Enter a valid international phone number, e.g. +2348012345678 or +447911123456.");
       return;
     }
     if (password.length < 8) {
@@ -116,7 +123,7 @@ export default function AuthPage() {
 
         <div className="auth-heading">
           <h1>{mode === "signup" ? "Create your account" : "Welcome back"}</h1>
-          <p>Phone number and password only. No OTP, SMS or Twilio.</p>
+          <p>International phone number and password only. No OTP, SMS or Twilio.</p>
         </div>
 
         <form onSubmit={submit} className="auth-form">
@@ -127,7 +134,7 @@ export default function AuthPage() {
             </>
           )}
 
-          <label><span>Phone number</span><div className="auth-input"><Phone size={18} /><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+2348012345678" inputMode="tel" autoComplete="tel" /></div></label>
+          <label><span>Phone number</span><div className="auth-input"><Phone size={18} /><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+2348012345678 or +447911123456" inputMode="tel" autoComplete="tel" /></div></label>
           <label><span>Password</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete={mode === "signup" ? "new-password" : "current-password"} /></div></label>
 
           {mode === "signup" && <label><span>Confirm password</span><div className="auth-input"><LockKeyhole size={18} /><input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repeat your password" autoComplete="new-password" /></div></label>}
