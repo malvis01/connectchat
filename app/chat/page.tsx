@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Phone, Play, Search, Send, Smile, Square, Sticker, UserRound, Video, X } from "lucide-react";
+import Link from "next/link";
+import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Phone, Play, Search, Send, Smile, Square, Sticker, UserRound, Video, X, CreditCard } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
 import { decryptText, encryptText, ensureE2EEKeypair, deriveSharedKey } from "@/lib/e2ee";
@@ -481,6 +482,7 @@ export default function ChatPage() {
       <aside className="chat-sidebar">
         <div className="chat-sidebar-header">
           <div className="auth-brand" style={{margin:0}}><span className="auth-logo"><MessageCircle size={21}/></span><div><strong>ConnectChat</strong><span>Private chats</span></div></div>
+          <Link href="/gift-cards" className="icon-button" title="Gift card marketplace" aria-label="Gift card marketplace"><CreditCard size={19}/></Link>
           <button className="icon-button" title="Rotate encryption key" onClick={() => void rotateMyEncryptionKey()}><UserRound size={19}/></button>
         </div>
         <div className="search-box"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search people by name, username or phone"/></div>
