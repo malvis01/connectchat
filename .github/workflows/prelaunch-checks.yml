@@ -1,6 +1,7 @@
 name: ConnectChat pre-launch checks
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - connectchat-prelaunch-validation
