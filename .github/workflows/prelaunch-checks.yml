@@ -1,0 +1,27 @@
+name: ConnectChat pre-launch checks
+
+on:
+  push:
+    branches:
+      - connectchat-prelaunch-validation
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Check TypeScript
+        run: npm run typecheck
+      - name: Build production bundle
+        run: npm run build
