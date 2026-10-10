@@ -30,7 +30,7 @@ export default function GiftCardAdminPage(){
    const {data:{user},error:authError}=await supabase.auth.getUser();
    if(authError)throw authError;
    if(!user){window.location.href="/gift-cards/admin/login";return;}
-   const {data,isError,error:rpcError}=await supabase.rpc("gift_card_admin_overview");
+   const {data,error:rpcError}=await supabase.rpc("gift_card_admin_overview");
    if(rpcError)throw rpcError;
    setOverview(data as Overview);
   }catch(e){setOverview(null);setError(e instanceof Error?e.message:"Could not load admin console.");}
