@@ -128,7 +128,7 @@ export default function GiftCardsPage() {
         <div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}><span style={{ display: "grid", placeItems: "center", width: 44, height: 44, borderRadius: 14, background: "#e0e7ff" }}><CreditCard size={24}/></span><div><h1 style={{ margin: 0, fontSize: 28 }}>Gift Card Marketplace</h1><p style={{ margin: "5px 0 0", color: "#667085" }}>Buy and list gift cards with moderation and order tracking.</p></div></div>
         </div>
-        <button style={{ ...buttonStyle, background: "#fff", color: "#344054", border: "1px solid #d0d5dd" }} onClick={() => void load()}><RefreshCw size={16}/> Refresh</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><Link href="/gift-cards/admin/login" style={{ ...buttonStyle, background: "#fff", color: "#344054", border: "1px solid #d0d5dd", textDecoration: "none" }}><ShieldCheck size={16}/> Admin sign in</Link><button style={{ ...buttonStyle, background: "#fff", color: "#344054", border: "1px solid #d0d5dd" }} onClick={() => void load()}><RefreshCw size={16}/> Refresh</button></div>
       </header>
 
       <section style={{ ...panelStyle, display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 18, background: "#fffaeb", borderColor: "#fedf89" }}>
