@@ -9,7 +9,7 @@ type AdminListing = { id:string;seller_id:string;brand:string;country_code:strin
 type AdminSeller = { user_id:string;business_name:string;country_code:string;contact_email:string|null;verification_status:string;created_at:string };
 type AdminDispute = { id:string;order_id:string;opened_by:string;reason:string;details:string;status:string;resolution_note:string|null;created_at:string };
 type AdminOrder = { id:string;listing_id:string;buyer_id:string;seller_id:string;currency:string;amount:number;platform_fee:number;status:string;payment_provider:string|null;provider_reference:string|null;created_at:string };
-type Overview = { counts:{pending_listings:number;pending_sellers:number;open_disputes:number;orders:number};listings:AdminListing[];sellers:AdminSeller[];disputes:AdminDispute[];orders:AdminOrder[] };
+type FinanceRow = {currency:string;completed_sales:number;commission_earned:number;paid_pending_fulfillment:number;refunded_amount:number;awaiting_payment_amount:number};\ntype Overview = { counts:{pending_listings:number;pending_sellers:number;open_disputes:number;orders:number};finance_by_currency:FinanceRow[];listings:AdminListing[];sellers:AdminSeller[];disputes:AdminDispute[];orders:AdminOrder[] };
 
 const panel:React.CSSProperties={background:"#fff",border:"1px solid #eaecf0",borderRadius:15,padding:17};
 const action:React.CSSProperties={display:"inline-flex",alignItems:"center",gap:6,border:0,borderRadius:9,padding:"9px 12px",fontWeight:700,cursor:"pointer"};
@@ -28,7 +28,7 @@ export default function GiftCardAdminPage(){
   try{
    const {data:{user},error:authError}=await supabase.auth.getUser();
    if(authError)throw authError;
-   if(!user){window.location.href="/auth";return;}
+   if(!user){window.location.href="/gift-cards/admin/login";return;}
    const {data,isError,error:rpcError}=await supabase.rpc("gift_card_admin_overview");
    if(rpcError)throw rpcError;
    setOverview(data as Overview);
@@ -69,6 +69,20 @@ export default function GiftCardAdminPage(){
    {notice&&<p role="status" style={{background:"#ecfdf3",color:"#027a48",padding:12,borderRadius:10}}>{notice}</p>}
    {error&&<p role="alert" style={{background:"#fef3f2",color:"#b42318",padding:12,borderRadius:10}}>{error}</p>}
    {loading?<section style={panel}>Loading operations…</section>:overview?<>
+    <section style={{...panel,marginBottom:18}}>
+     <h2 style={{margin:"0 0 6px",fontSize:19}}>Financial overview</h2>
+     <p style={{margin:"0 0 14px",color:"#667085",fontSize:13,lineHeight:1.5}}>The platform fee is set to 5% of the asking price. Commission is counted as earned only for fulfilled orders; pending payment, paid-but-unfulfilled orders and refunds are shown separately. Amounts remain grouped by currency.</p>
+     {!overview.finance_by_currency?.length?<p style={{margin:0,color:"#667085"}}>No gift-card orders have been recorded yet.</p>:<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
+      {overview.finance_by_currency.map(f=><div key={f.currency} style={{border:"1px solid #eaecf0",borderRadius:12,padding:13}}>
+       <strong style={{fontSize:16}}>{f.currency}</strong>
+       <div style={{marginTop:10,fontSize:13,color:"#667085"}}>Completed sales</div><strong>{f.currency} {Number(f.completed_sales).toFixed(2)}</strong>
+       <div style={{marginTop:8,fontSize:13,color:"#667085"}}>Commission earned (5%)</div><strong style={{color:"#027a48"}}>{f.currency} {Number(f.commission_earned).toFixed(2)}</strong>
+       <div style={{marginTop:8,fontSize:13,color:"#667085"}}>Paid, awaiting fulfillment</div><strong>{f.currency} {Number(f.paid_pending_fulfillment).toFixed(2)}</strong>
+       <div style={{marginTop:8,fontSize:13,color:"#667085"}}>Awaiting payment</div><strong>{f.currency} {Number(f.awaiting_payment_amount).toFixed(2)}</strong>
+       <div style={{marginTop:8,fontSize:13,color:"#667085"}}>Refunded volume</div><strong>{f.currency} {Number(f.refunded_amount).toFixed(2)}</strong>
+      </div>)}
+     </div>}
+    </section>
     <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:18}}>
      {([["Pending listings",overview.counts.pending_listings],["Pending sellers",overview.counts.pending_sellers],["Open disputes",overview.counts.open_disputes],["Total orders",overview.counts.orders]] as const).map(([label,value])=><div key={label} style={panel}><div style={{color:"#667085",fontSize:13}}>{label}</div><strong style={{fontSize:28,display:"block",marginTop:8}}>{value}</strong></div>)}
     </section>
