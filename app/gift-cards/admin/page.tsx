@@ -28,7 +28,7 @@ export default function GiftCardAdminPage(){
   try{
    const {data:{user},error:authError}=await supabase.auth.getUser();
    if(authError)throw authError;
-   if(!user){window.location.href="/auth";return;}
+   if(!user){window.location.href="/auth?next=%2Fgift-cards%2Fadmin";return;}
    const {data,isError,error:rpcError}=await supabase.rpc("gift_card_admin_overview");
    if(rpcError)throw rpcError;
    setOverview(data as Overview);
