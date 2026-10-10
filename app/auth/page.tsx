@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { LockKeyhole, MessageCircle, Phone, UserRound } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 
@@ -27,6 +27,11 @@ function syntheticEmail(phone: string): string {
 
 export default function AuthPage() {
   const [mode, setMode] = useState<Mode>("signup");
+
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (next === "/gift-cards/admin") setMode("login");
+  }, []);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -105,7 +110,9 @@ export default function AuthPage() {
         return;
       }
 
-      window.location.href = "/chat";
+      const requestedNext = new URLSearchParams(window.location.search).get("next");
+      const destination = mode === "login" && requestedNext === "/gift-cards/admin" ? requestedNext : "/chat";
+      window.location.href = destination;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Authentication failed. Please try again.");
     } finally {
