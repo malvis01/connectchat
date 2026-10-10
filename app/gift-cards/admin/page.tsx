@@ -9,7 +9,8 @@ type AdminListing = { id:string;seller_id:string;brand:string;country_code:strin
 type AdminSeller = { user_id:string;business_name:string;country_code:string;contact_email:string|null;verification_status:string;created_at:string };
 type AdminDispute = { id:string;order_id:string;opened_by:string;reason:string;details:string;status:string;resolution_note:string|null;created_at:string };
 type AdminOrder = { id:string;listing_id:string;buyer_id:string;seller_id:string;currency:string;amount:number;platform_fee:number;status:string;payment_provider:string|null;provider_reference:string|null;created_at:string };
-type FinanceRow = {currency:string;completed_sales:number;commission_earned:number;paid_pending_fulfillment:number;refunded_amount:number;awaiting_payment_amount:number};\ntype Overview = { counts:{pending_listings:number;pending_sellers:number;open_disputes:number;orders:number};finance_by_currency:FinanceRow[];listings:AdminListing[];sellers:AdminSeller[];disputes:AdminDispute[];orders:AdminOrder[] };
+type FinanceRow = {currency:string;completed_sales:number;commission_earned:number;paid_pending_fulfillment:number;refunded_amount:number;awaiting_payment_amount:number};
+type Overview = { counts:{pending_listings:number;pending_sellers:number;open_disputes:number;orders:number};finance_by_currency:FinanceRow[];listings:AdminListing[];sellers:AdminSeller[];disputes:AdminDispute[];orders:AdminOrder[] };
 
 const panel:React.CSSProperties={background:"#fff",border:"1px solid #eaecf0",borderRadius:15,padding:17};
 const action:React.CSSProperties={display:"inline-flex",alignItems:"center",gap:6,border:0,borderRadius:9,padding:"9px 12px",fontWeight:700,cursor:"pointer"};
