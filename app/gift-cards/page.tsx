@@ -133,7 +133,7 @@ export default function GiftCardsPage() {
 
       <section style={{ ...panelStyle, display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 18, background: "#fffaeb", borderColor: "#fedf89" }}>
         <ShieldCheck size={22} color="#b54708" style={{ flexShrink: 0, marginTop: 2 }}/>
-        <div><strong>Buyer protection status</strong><p style={{ margin: "5px 0 0", color: "#7a2e0e", lineHeight: 1.55 }}>Marketplace listings and order reservations are enabled. Live checkout, payment-webhook verification, seller payouts, and encrypted card delivery must be connected and tested before accepting real payments. Never enter a gift card number or PIN into a listing description.</p></div>
+        <div><strong>Buyer protection status</strong><p style={{ margin: "5px 0 0", color: "#7a2e0e", lineHeight: 1.55 }}>Marketplace listings and expiring reservations are enabled. Stripe checkout is not enabled: Stripe's published policy restricts gift-card/stored-value sales and third-party payment facilitation, so written approval for this exact marketplace is required first. Verified webhooks, secure encrypted delivery, refunds, and seller payouts must be implemented and tested before accepting real payments. Never enter a gift card number or PIN into a listing description.</p></div>
       </section>
 
       {notice && <p role="status" style={{ padding: 13, borderRadius: 10, background: "#ecfdf3", color: "#027a48" }}>{notice}</p>}
