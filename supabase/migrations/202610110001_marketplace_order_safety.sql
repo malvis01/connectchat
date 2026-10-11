@@ -76,7 +76,9 @@ begin
       update public.gift_card_listings
       set status = 'active', updated_at = now()
       where id = p_listing_id and status = 'reserved';
-      v_listing.status := 'active';
+      if found then
+        v_listing.status := 'active';
+      end if;
     elsif v_order.buyer_id = v_buyer then
       return v_order;
     else
@@ -153,43 +155,65 @@ security definer
 set search_path = public, pg_temp
 as $function$
 declare
+  v_listing_id uuid;
+  v_listing public.gift_card_listings%rowtype;
   v_order public.gift_card_orders%rowtype;
   v_count integer := 0;
 begin
-  for v_order in
-    select * from public.gift_card_orders
+  -- Lock in the same order as create_gift_card_order (listing, then order)
+  -- to avoid a reservation-expiry/create-order deadlock.
+  for v_listing_id in
+    select distinct listing_id
+    from public.gift_card_orders
     where status in ('awaiting_payment','payment_pending')
       and expires_at is not null and expires_at <= now()
-    order by expires_at
-    for update skip locked
+    order by listing_id
   loop
-    update public.gift_card_orders
-    set status = 'cancelled', updated_at = now()
-    where id = v_order.id
-      and status in ('awaiting_payment','payment_pending');
+    select * into v_listing
+    from public.gift_card_listings
+    where id = v_listing_id
+    for update skip locked;
 
-    if found then
-      update public.gift_card_listings l
-      set status = 'active', updated_at = now()
-      where l.id = v_order.listing_id
-        and l.status = 'reserved'
-        and not exists (
-          select 1 from public.gift_card_orders o
-          where o.listing_id = l.id
-            and o.status in ('paid','fulfillment_pending','disputed')
-        )
-        and not exists (
-          select 1 from public.gift_card_orders o
-          where o.listing_id = l.id
-            and o.status in ('awaiting_payment','payment_pending')
-            and o.expires_at > now()
-        );
-
-      insert into public.gift_card_audit_events(actor_id, entity_type, entity_id, action, metadata)
-      values (null, 'gift_card_order', v_order.id, 'reservation_expired',
-              jsonb_build_object('listing_id', v_order.listing_id, 'expired_at', v_order.expires_at));
-      v_count := v_count + 1;
+    if not found then
+      continue;
     end if;
+
+    for v_order in
+      select * from public.gift_card_orders
+      where listing_id = v_listing_id
+        and status in ('awaiting_payment','payment_pending')
+        and expires_at is not null and expires_at <= now()
+      order by expires_at
+      for update skip locked
+    loop
+      update public.gift_card_orders
+      set status = 'cancelled', updated_at = now()
+      where id = v_order.id
+        and status in ('awaiting_payment','payment_pending');
+
+      if found then
+        update public.gift_card_listings l
+        set status = 'active', updated_at = now()
+        where l.id = v_order.listing_id
+          and l.status = 'reserved'
+          and not exists (
+            select 1 from public.gift_card_orders o
+            where o.listing_id = l.id
+              and o.status in ('paid','fulfillment_pending','disputed')
+          )
+          and not exists (
+            select 1 from public.gift_card_orders o
+            where o.listing_id = l.id
+              and o.status in ('awaiting_payment','payment_pending')
+              and o.expires_at > now()
+          );
+
+        insert into public.gift_card_audit_events(actor_id, entity_type, entity_id, action, metadata)
+        values (null, 'gift_card_order', v_order.id, 'reservation_expired',
+                jsonb_build_object('listing_id', v_order.listing_id, 'expired_at', v_order.expires_at));
+        v_count := v_count + 1;
+      end if;
+    end loop;
   end loop;
   return v_count;
 end;
