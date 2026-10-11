@@ -76,6 +76,7 @@ begin
       update public.gift_card_listings
       set status = 'active', updated_at = now()
       where id = p_listing_id and status = 'reserved';
+      v_listing.status := 'active';
     elsif v_order.buyer_id = v_buyer then
       return v_order;
     else
