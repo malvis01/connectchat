@@ -128,12 +128,12 @@ export default function GiftCardsPage() {
         <div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}><span style={{ display: "grid", placeItems: "center", width: 44, height: 44, borderRadius: 14, background: "#e0e7ff" }}><CreditCard size={24}/></span><div><h1 style={{ margin: 0, fontSize: 28 }}>Gift Card Marketplace</h1><p style={{ margin: "5px 0 0", color: "#667085" }}>Buy and list gift cards with moderation and order tracking.</p></div></div>
         </div>
-        <button style={{ ...buttonStyle, background: "#fff", color: "#344054", border: "1px solid #d0d5dd" }} onClick={() => void load()}><RefreshCw size={16}/> Refresh</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><Link href="/gift-cards/admin/login" style={{ ...buttonStyle, background: "#fff", color: "#344054", border: "1px solid #d0d5dd", textDecoration: "none" }}><ShieldCheck size={16}/> Admin sign in</Link><button style={{ ...buttonStyle, background: "#fff", color: "#344054", border: "1px solid #d0d5dd" }} onClick={() => void load()}><RefreshCw size={16}/> Refresh</button></div>
       </header>
 
       <section style={{ ...panelStyle, display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 18, background: "#fffaeb", borderColor: "#fedf89" }}>
         <ShieldCheck size={22} color="#b54708" style={{ flexShrink: 0, marginTop: 2 }}/>
-        <div><strong>Buyer protection status</strong><p style={{ margin: "5px 0 0", color: "#7a2e0e", lineHeight: 1.55 }}>Marketplace listings and order reservations are enabled. Live checkout, payment-webhook verification, seller payouts, and encrypted card delivery must be connected and tested before accepting real payments. Never enter a gift card number or PIN into a listing description.</p></div>
+        <div><strong>Buyer protection status</strong><p style={{ margin: "5px 0 0", color: "#7a2e0e", lineHeight: 1.55 }}>Marketplace listings and expiring reservations are enabled. Stripe checkout is not enabled: Stripe's published policy restricts gift-card/stored-value sales and third-party payment facilitation, so written approval for this exact marketplace is required first. Verified webhooks, secure encrypted delivery, refunds, and seller payouts must be implemented and tested before accepting real payments. Never enter a gift card number or PIN into a listing description.</p></div>
       </section>
 
       {notice && <p role="status" style={{ padding: 13, borderRadius: 10, background: "#ecfdf3", color: "#027a48" }}>{notice}</p>}
