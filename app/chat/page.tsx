@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, ImagePlus, MessageCircle, Mic, Paperclip, Phone, Play, Search, Send, Smile, Square, Sticker, UserRound, Video, X } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 import { getOrCreateDirectConversation, type Profile } from "@/lib/connectchat";
-import { decryptText, encryptText, ensureE2EEKeypair, deriveSharedKey } from "@/lib/e2ee";
+import { decryptText, encryptText, ensureE2EEKeypair } from "@/lib/e2ee";
 import { decryptBlob, encryptFile } from "@/lib/e2ee-media";
 import { listContactDevices, listTrustedDevices, registerE2EEDevice, rotateAndRegisterE2EEDevice, trustE2EEDevice } from "@/lib/e2ee-key-management";
 
@@ -255,6 +255,8 @@ export default function ChatPage() {
       if(rowError||!data)throw rowError??new Error("Could not create call.");
       await supabase.from("call_participants").insert({call_id:data.id,user_id:profile.id,joined_at:new Date().toISOString()});
       const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+      const pendingIce: RTCIceCandidateInit[] = [];
+      let remoteDescriptionSet = false;
       media.getTracks().forEach(t=>pc.addTrack(t,media)); pc.ontrack=e=>setRemoteStream(e.streams[0]??null);
       const ch=supabase.channel("call:"+data.id);
       ch.on("broadcast",{event:"signal"},async({payload})=>{
@@ -264,10 +266,25 @@ export default function ChatPage() {
           await pc.setLocalDescription(offer);
           await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"offer",offer}});
         }
-        if(payload.type==="answer"){await pc.setRemoteDescription(payload.answer);await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",data.id);setCall(c=>c?{...c,status:"active"}:c);}
-        if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
+        if(payload.type==="answer"){
+          await pc.setRemoteDescription(payload.answer);
+          remoteDescriptionSet = true;
+          for(const candidate of pendingIce.splice(0)) await pc.addIceCandidate(candidate);
+          await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",data.id);
+          setCall(c=>c?{...c,status:"active"}:c);
+        }
+        if(payload.type==="ice"&&payload.candidate){
+          if(remoteDescriptionSet) await pc.addIceCandidate(payload.candidate);
+          else pendingIce.push(payload.candidate);
+        }
         if(payload.type==="decline"||payload.type==="hangup")await endCall(payload.type==="decline"?"declined":"ended",false);
-      }).subscribe();
+      });
+      await new Promise<void>((resolve,reject)=>{
+        ch.subscribe(status=>{
+          if(status==="SUBSCRIBED") resolve();
+          else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT") reject(new Error("Call signaling channel failed to connect."));
+        });
+      });
       const invite=supabase.channel(`user-call:${selected.id}`);
       invite.subscribe(async status=>{if(status==="SUBSCRIBED"){await invite.send({type:"broadcast",event:"invite",payload:{from:profile.id,callId:data.id,callType:type,conversationId}});setTimeout(()=>{void supabase.removeChannel(invite)},5000);}});
       pc.onicecandidate=e=>{if(e.candidate)void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ice",candidate:e.candidate}})};
@@ -280,14 +297,35 @@ export default function ChatPage() {
     try{
       const media=await navigator.mediaDevices.getUserMedia({audio:true,video:type==="video"});
       const pc=new RTCPeerConnection({iceServers:[{urls:"stun:stun.l.google.com:19302"}]});
+      const pendingIce: RTCIceCandidateInit[] = [];
+      let remoteDescriptionSet = false;
       media.getTracks().forEach(t=>pc.addTrack(t,media)); pc.ontrack=e=>setRemoteStream(e.streams[0]??null);
       const ch=supabase.channel("call:"+callId);
       ch.on("broadcast",{event:"signal"},async({payload})=>{
         if(payload?.from===profile.id)return;
-        if(payload.type==="offer"){await pc.setRemoteDescription(payload.offer);const answer=await pc.createAnswer();await pc.setLocalDescription(answer);await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"answer",answer}});await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",callId);}
-        if(payload.type==="ice"&&payload.candidate)await pc.addIceCandidate(payload.candidate);
+        if(payload.type==="offer"){
+          await pc.setRemoteDescription(payload.offer);
+          remoteDescriptionSet = true;
+          for(const candidate of pendingIce.splice(0)) await pc.addIceCandidate(candidate);
+          const answer=await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"answer",answer}});
+          await supabase.from("calls").update({status:"active",started_at:new Date().toISOString()}).eq("id",callId);
+        }
+        if(payload.type==="ice"){
+          if(!payload.candidate)return;
+          if(remoteDescriptionSet) await pc.addIceCandidate(payload.candidate);
+          else pendingIce.push(payload.candidate);
+        }
         if(payload.type==="hangup")await endCall("ended",false);
-      }).subscribe(async status=>{if(status==="SUBSCRIBED"){await ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ready"}});}});
+      });
+      await new Promise<void>((resolve,reject)=>{
+        ch.subscribe(status=>{
+          if(status==="SUBSCRIBED"){
+            void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ready"}}).then(()=>resolve());
+          } else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT") reject(new Error("Call signaling channel failed to connect."));
+        });
+      });
       pc.onicecandidate=e=>{if(e.candidate)void ch.send({type:"broadcast",event:"signal",payload:{from:profile.id,type:"ice",candidate:e.candidate}})};
       await supabase.from("call_participants").upsert({call_id:callId,user_id:profile.id,joined_at:new Date().toISOString()});
       setLocalStream(media);setCall(c=>c?{...c,status:"active"}:c);callChannelRef.current=ch;peerRef.current=pc;
@@ -333,8 +371,21 @@ export default function ChatPage() {
             ...raw,
             body: raw.body && raw.message_type === "text" && person.e2ee_public_key ? await decryptText(raw.body, person.e2ee_public_key).catch(() => "🔒 Unable to decrypt this message") : raw.body,
           };
-          const { data: attachments } = await supabase.from("message_attachments").select("*").eq("message_id", message.id);
-          setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, { ...message, attachments: attachments ?? [], reactions: [] }]);
+          // Attachment rows are created immediately after the message row. Realtime can
+          // deliver the message INSERT before the attachment INSERT is visible, so retry
+          // briefly instead of showing a permanent attachment-less message.
+          let attachments: Attachment[] = [];
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            const { data } = await supabase.from("message_attachments").select("*").eq("message_id", message.id);
+            attachments = (data ?? []) as Attachment[];
+            if (attachments.length || message.message_type === "text" || message.message_type === "sticker") break;
+            await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+          }
+          setMessages((current) => current.some((item) => item.id === message.id)
+            ? current.map((item) => item.id === message.id && item.attachments.length === 0 && attachments.length
+              ? { ...item, attachments }
+              : item)
+            : [...current, { ...message, attachments, reactions: [] }]);
         })
         .on("broadcast", { event: "typing" }, ({ payload }) => { if (payload?.userId === person.id) setTyping(Boolean(payload.isTyping)); })
         .on("broadcast", { event: "reaction" }, ({ payload }) => {
@@ -369,8 +420,8 @@ export default function ChatPage() {
     if (!profile) return;
     try {
       const result = await rotateAndRegisterE2EEDevice(profile.id);
-      await supabase.from("profiles").update({ e2ee_public_key: result.publicKey }).eq("id", profile.id);
-      setProfile((current) => current ? { ...current, e2ee_public_key: result.publicKey } : current);
+      await supabase.from("profiles").update({ e2ee_public_key: result.public_key }).eq("id", profile.id);
+      setProfile((current) => current ? { ...current, e2ee_public_key: result.public_key } : current);
       setError("Encryption key rotated. Your previous keys remain locally available for older messages.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not rotate encryption key.");
@@ -397,19 +448,25 @@ export default function ChatPage() {
         if (file.size > 50 * 1024 * 1024) throw new Error("Each file must be 50 MB or smaller.");
         const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}-${safeName(file.name)}.enc`;
         if (!selected?.e2ee_public_key) throw new Error("Secure media is unavailable for this user.");
-        const mediaKey = await deriveSharedKey(selected.e2ee_public_key);
-        const encrypted = await encryptFile(file, mediaKey);
+        const encrypted = await encryptFile(file, selected.e2ee_public_key);
         const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, encrypted, { contentType: "application/octet-stream", upsert: false });
         if (uploadError) throw uploadError;
         const { data: message, error: messageError } = await supabase.from("messages").insert({
           conversation_id: conversationId, sender_id: profile.id, message_type: kind
         }).select("id").single();
-        if (messageError) throw messageError;
+        if (messageError) {
+          await supabase.storage.from("connectchat-media").remove([path]);
+          throw messageError;
+        }
         const { error: attachmentError } = await supabase.from("message_attachments").insert({
           message_id: message.id, storage_path: path, file_name: file.name, mime_type: file.type || "application/octet-stream",
           file_size: file.size, width: kind === "image" ? undefined : null, height: kind === "image" ? undefined : null
         });
-        if (attachmentError) throw attachmentError;
+        if (attachmentError) {
+          await supabase.from("messages").delete().eq("id", message.id);
+          await supabase.storage.from("connectchat-media").remove([path]);
+          throw attachmentError;
+        }
       }
     } catch (e) { setError(e instanceof Error ? e.message : "Upload failed."); }
     finally { setUploading(false); }
@@ -435,14 +492,20 @@ export default function ChatPage() {
         try {
           const path = `${conversationId}/${profile.id}/${crypto.randomUUID()}.webm.enc`;
           if (!selected?.e2ee_public_key) throw new Error("Secure media is unavailable for this user.");
-          const mediaKey = await deriveSharedKey(selected.e2ee_public_key);
-          const encrypted = await encryptFile(new File([blob], "voice-message.webm", { type: mime }), mediaKey);
+          const encrypted = await encryptFile(new File([blob], "voice-message.webm", { type: mime }), selected.e2ee_public_key);
           const { error: uploadError } = await supabase.storage.from("connectchat-media").upload(path, encrypted, { contentType: "application/octet-stream", upsert: false });
           if (uploadError) throw uploadError;
           const { data: message, error: messageError } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: profile.id, message_type: "voice" }).select("id").single();
-          if (messageError) throw messageError;
+          if (messageError) {
+            await supabase.storage.from("connectchat-media").remove([path]);
+            throw messageError;
+          }
           const { error: attachmentError } = await supabase.from("message_attachments").insert({ message_id: message.id, storage_path: path, file_name: "voice-message.webm", mime_type: mime, file_size: blob.size, duration_seconds: seconds });
-          if (attachmentError) throw attachmentError;
+          if (attachmentError) {
+            await supabase.from("messages").delete().eq("id", message.id);
+            await supabase.storage.from("connectchat-media").remove([path]);
+            throw attachmentError;
+          }
         } catch (e) { setError(e instanceof Error ? e.message : "Voice upload failed."); }
         finally { setUploading(false); }
       };
@@ -457,12 +520,17 @@ export default function ChatPage() {
     if (recordTimer.current) { clearInterval(recordTimer.current); recordTimer.current = null; }
   }
 
-  async function openAttachment(attachment: Attachment) {
+  async function openAttachment(attachment: Attachment, senderPublicKey?: string | null) {
     try {
       if (!selected?.e2ee_public_key) throw new Error("Secure media key unavailable.");
-      const encrypted = await fetch(await getSignedUrl(attachment.storage_path)).then(r => r.blob());
-      const blob = await decryptBlob(encrypted, await deriveSharedKey(selected.e2ee_public_key));
-      window.open(URL.createObjectURL(blob), "_blank", "noopener,noreferrer");
+      const response = await fetch(await getSignedUrl(attachment.storage_path));
+      if (!response.ok) throw new Error("Could not download encrypted media.");
+      const encrypted = await response.blob();
+      const blob = await decryptBlob(encrypted, senderPublicKey ?? selected.e2ee_public_key);
+      const objectUrl = URL.createObjectURL(blob);
+      const opened = window.open(objectUrl, "_blank", "noopener,noreferrer");
+      if (!opened) URL.revokeObjectURL(objectUrl);
+      else window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not open file."); }
   }
 
@@ -521,7 +589,7 @@ export default function ChatPage() {
                 {message.message_type === "sticker" && message.body ? <img src={message.body} alt="Sticker" className="message-sticker" /> : message.body && <div>{message.body}</div>}
                 {message.reactions.length > 0 && <div className="reaction-summary">{Object.entries(message.reactions.reduce<Record<string, number>>((a, r) => { a[r.emoji] = (a[r.emoji] ?? 0) + 1; return a; }, {})).map(([emoji, count]) => <button key={emoji} onClick={() => void toggleReaction(message.id, emoji)}>{emoji} {count}</button>)}</div>}
                 <div className="reaction-picker"><button title="Like" onClick={() => void toggleReaction(message.id, "👍")}>👍</button><button onClick={() => void toggleReaction(message.id, "❤️")}>❤️</button><button onClick={() => void toggleReaction(message.id, "😂")}>😂</button><button onClick={() => void toggleReaction(message.id, "🔥")}>🔥</button></div>
-                {message.attachments.map((attachment) => <AttachmentView key={attachment.id} attachment={attachment} onOpen={openAttachment} getUrl={getSignedUrl} publicKey={selected?.e2ee_public_key ?? null}/>)}
+                {message.attachments.map((attachment) => <AttachmentView key={attachment.id} attachment={attachment} onOpen={openAttachment} getUrl={getSignedUrl} publicKey={selected?.e2ee_public_key ?? null} senderPublicKey={mine ? profile?.e2ee_public_key ?? null : selected?.e2ee_public_key ?? null}/>)}
                 <time>{new Date(message.created_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</time>
               </div></div>;
             })}
@@ -549,21 +617,32 @@ export default function ChatPage() {
   );
 }
 
-function AttachmentView({attachment,onOpen,getUrl,publicKey}:{attachment:Attachment;onOpen:(a:Attachment)=>void;getUrl:(path:string)=>Promise<string>;publicKey:string|null}) {
+function AttachmentView({attachment,onOpen,getUrl,publicKey,senderPublicKey}:{attachment:Attachment;onOpen:(a:Attachment,senderPublicKey?:string|null)=>void;getUrl:(path:string)=>Promise<string>;publicKey:string|null;senderPublicKey:string|null}) {
   const [url,setUrl]=useState("");
-  useEffect(()=>{let alive=true;
-    void (async()=>{try{
-      if(!publicKey) return;
-      const encrypted=await fetch(await getUrl(attachment.storage_path)).then(r=>r.blob());
-      const plain=await decryptBlob(encrypted,await deriveSharedKey(publicKey));
-      const objectUrl=URL.createObjectURL(new Blob([plain],{type:attachment.mime_type}));
-      if(alive)setUrl(objectUrl); else URL.revokeObjectURL(objectUrl);
-    }catch{} })();
-    return()=>{alive=false;if(url)URL.revokeObjectURL(url)};
-  },[attachment.storage_path,attachment.mime_type,publicKey]);
+  useEffect(()=>{
+    let alive=true;
+    let objectUrl="";
+    setUrl("");
+    void (async()=>{
+      try{
+        if(!publicKey) return;
+        const response=await fetch(await getUrl(attachment.storage_path));
+        if(!response.ok) throw new Error("Could not download encrypted media.");
+        const encrypted=await response.blob();
+        const plain=await decryptBlob(encrypted, senderPublicKey ?? undefined);
+        objectUrl=URL.createObjectURL(new Blob([plain],{type:attachment.mime_type}));
+        if(alive) setUrl(objectUrl);
+        else URL.revokeObjectURL(objectUrl);
+      }catch{}
+    })();
+    return()=>{
+      alive=false;
+      if(objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  },[attachment.storage_path,attachment.mime_type,publicKey,senderPublicKey,getUrl]);
   if (!url) return <div className="attachment-loading">Decrypting {attachment.file_name}…</div>;
-  if (attachment.mime_type.startsWith("image/")) return <img src={url} alt={attachment.file_name} className="message-image" onClick={()=>onOpen(attachment)}/>;
+  if (attachment.mime_type.startsWith("image/")) return <img src={url} alt={attachment.file_name} className="message-image" onClick={()=>onOpen(attachment,senderPublicKey)}/>;
   if (attachment.mime_type.startsWith("video/")) return <video src={url} controls playsInline className="message-video"/>;
   if (attachment.mime_type.startsWith("audio/")) return <AudioMessage src={url} duration={attachment.duration_seconds}/>;
-  return <button className="file-card" onClick={()=>onOpen(attachment)}><FileText size={24}/><span><strong>{attachment.file_name}</strong><small>{formatSize(attachment.file_size)} · Open</small></span></button>;
+  return <button className="file-card" onClick={()=>onOpen(attachment,senderPublicKey)}><FileText size={24}/><span><strong>{attachment.file_name}</strong><small>{formatSize(attachment.file_size)} · Open</small></span></button>;
 }
