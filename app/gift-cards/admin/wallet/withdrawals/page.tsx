@@ -8,8 +8,6 @@ import { supabase } from "@/lib/supabase-browser";
 type RequestRow = { id:string;user_id:string;amount:number;currency:string;status:string;user_note:string|null;admin_note:string|null;created_at:string;bank_name:string;account_name:string;country_code:string;account_number_last4:string };
 const box:React.CSSProperties={background:"#fff",border:"1px solid #eaecf0",borderRadius:14,padding:16};
 const button:React.CSSProperties={border:0,borderRadius:8,padding:"9px 12px",fontWeight:700,cursor:"pointer"};
-async function hashCode(value:string){const bytes=new TextEncoder().encode(value);const digest=await crypto.subtle.digest("SHA-256",bytes);return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("");}
-function makeCode(){const values=new Uint32Array(1);crypto.getRandomValues(values);return String(values[0]%100000000).padStart(8,"0");}
 
 export default function AdminWithdrawalsPage(){
  const [rows,setRows]=useState<RequestRow[]>([]);
@@ -32,11 +30,10 @@ export default function AdminWithdrawalsPage(){
  async function issueCode(row:RequestRow){
   setBusy(row.id);setError("");setNotice("");
   try{
-   const code=makeCode();
-   const codeHash=await hashCode(code);
-   const {error:e}=await supabase.rpc("virtual_wallet_admin_issue_code",{p_withdrawal_id:row.id,p_code_hash:codeHash,p_expires_at:new Date(Date.now()+15*60*1000).toISOString()});
-   if(e)throw e;
-   setIssuedCodes(current=>({...current,[row.id]:code}));
+   const response=await fetch("/api/admin/wallet/issue-code",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({withdrawal_id:row.id})});
+   const result=await response.json();
+   if(!response.ok)throw new Error(result.error||"Could not issue code.");
+   setIssuedCodes(current=>({...current,[row.id]:result.code}));
    setNotice("One-time code created. Share it only with the verified user through official support; it expires in 15 minutes and is limited to five attempts.");
    await load();
   }catch(e){setError(e instanceof Error?e.message:"Could not issue verification code.");}
