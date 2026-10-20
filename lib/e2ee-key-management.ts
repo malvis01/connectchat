@@ -23,7 +23,7 @@ export async function rotateAndRegisterE2EEDevice(userId: string) {
     last_seen_at: new Date().toISOString(), revoked_at: null,
   }, { onConflict: "user_id,public_key" }).select("id,device_name,public_key,fingerprint,created_at,last_seen_at,revoked_at").single();
   if (error) throw error;
-  return { ...data, privateKey: keys.privateKey };
+  return { ...data, publicKey: keys.publicKey, privateKey: keys.privateKey };
 }
 
 export async function registerE2EEDevice(userId: string) {
