@@ -12,11 +12,6 @@ type BankAccount = { id: string; country_code: string; bank_name: string; accoun
 
 const panel: React.CSSProperties = { background: "#fff", border: "1px solid #eaecf0", borderRadius: 14, padding: 16 };
 const field: React.CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #d0d5dd", borderRadius: 9, padding: 10, font: "inherit", marginTop: 5 };
-async function sha256Hex(value: string) {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
-}
 
 export default function WalletPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -106,10 +101,9 @@ export default function WalletPage() {
     try {
       const code = (codes[id] ?? "").trim();
       if (!/^\d{8}$/.test(code)) throw new Error("Enter the 8-digit verification code supplied by official ConnectChat support.");
-      const hash = await sha256Hex(code);
-      const { data, error: rpcError } = await supabase.rpc("virtual_wallet_verify_withdrawal_code", { p_withdrawal_id: id, p_code_hash: hash });
-      if (rpcError) throw rpcError;
-      if (data !== true) throw new Error("Code invalid, expired, already used, or attempts exhausted. Contact support.");
+      const response = await fetch("/api/wallet/verify-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ withdrawal_id: id, code }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not verify code.");
       setNotice("Verification succeeded. The request is now awaiting administrator payout review; verification does not send money.");
       setCodes(current => ({ ...current, [id]: "" }));
       await load();
