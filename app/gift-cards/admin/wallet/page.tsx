@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, RefreshCw, ShieldCheck, Wallet } from "lucide-react";
+import { ArrowLeft, RefreshCw, ShieldCheck, Wallet, ClipboardList } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 
 type WalletRow = { user_id: string; currency: string; is_frozen: boolean };
@@ -55,7 +55,7 @@ export default function WalletAdminPage() {
   return <main style={{ minHeight: "100vh", background: "#f8fafc", color: "#101828", padding: "22px 16px 48px" }}>
     <div style={{ maxWidth: 980, margin: "0 auto" }}>
       <Link href="/gift-cards/admin" style={{ display: "inline-flex", gap: 8, alignItems: "center", color: "#475467", textDecoration: "none", marginBottom: 18 }}><ArrowLeft size={17}/> Admin operations</Link>
-      <header style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}><Wallet size={30}/><div><h1 style={{ margin: 0, fontSize: 28 }}>Virtual wallet controls</h1><p style={{ color: "#667085", margin: "5px 0 0" }}>Add or remove internal test/service credits with an audit reason.</p></div></header>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 18 }}><div style={{ display: "flex", alignItems: "center", gap: 12 }}><Wallet size={30}/><div><h1 style={{ margin: 0, fontSize: 28 }}>Virtual wallet controls</h1><p style={{ color: "#667085", margin: "5px 0 0" }}>Add or remove internal test/service credits with an audit reason.</p></div></div><Link href="/gift-cards/admin/wallet/withdrawals" style={{ display: "inline-flex", alignItems: "center", gap: 7, borderRadius: 9, padding: "10px 12px", background: "#eef4ff", color: "#1849a9", fontWeight: 700, textDecoration: "none" }}><ClipboardList size={16}/> Withdrawal review</Link></header>
       <section style={{ ...box, display: "flex", gap: 12, alignItems: "start", background: "#fffaeb", borderColor: "#fedf89", marginBottom: 16 }}><ShieldCheck size={22} color="#b54708"/><div><strong>Virtual credits only</strong><p style={{ margin: "5px 0 0", color: "#7a2e0e", lineHeight: 1.5 }}>These entries are not bank deposits, payment confirmations, or proof that cash is available. A separate real-money payout arrangement is required before any actual transfer.</p></div></section>
       {error && <p role="alert" style={{ background: "#fef3f2", color: "#b42318", padding: 12, borderRadius: 9 }}>{error}</p>}
       {notice && <p role="status" style={{ background: "#ecfdf3", color: "#027a48", padding: 12, borderRadius: 9 }}>{notice}</p>}
