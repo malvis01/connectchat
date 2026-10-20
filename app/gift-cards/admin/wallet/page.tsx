@@ -14,7 +14,7 @@ const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", bor
 export default function WalletAdminPage() {
   const [userId, setUserId] = useState("");
   const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState("NGN");
+  const currency = "NGN";
   const [reason, setReason] = useState("");
   const [action, setAction] = useState<"credit" | "debit">("credit");
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
@@ -65,7 +65,7 @@ export default function WalletAdminPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
           <label>Action<select value={action} onChange={e => setAction(e.target.value as "credit"|"debit")} style={input}><option value="credit">Add virtual balance</option><option value="debit">Remove virtual balance</option></select></label>
           <label>Amount<input required type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} style={input}/></label>
-          <label>Currency<select value={currency} onChange={e => setCurrency(e.target.value)} style={input}><option>NGN</option><option>USD</option><option>GBP</option><option>EUR</option><option>CAD</option><option>GHS</option><option>KES</option></select></label>
+          <label>Currency<input value="NGN" readOnly style={input}/><small style={{color:"#667085"}}>Single-currency wallet is currently NGN. Multi-currency wallets are not implemented yet.</small></label>
         </div>
         <label>Reason (required for audit)<textarea required minLength={5} maxLength={500} value={reason} onChange={e => setReason(e.target.value)} placeholder="Explain why this adjustment is needed" rows={3} style={input}/></label>
         <button disabled={busy} style={{ justifySelf: "start", border: 0, borderRadius: 9, padding: "11px 16px", background: "#101828", color: "#fff", fontWeight: 700, cursor: busy ? "wait" : "pointer" }}>{busy ? "Saving…" : "Save wallet adjustment"}</button>
