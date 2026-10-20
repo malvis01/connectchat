@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, RefreshCw, ShieldAlert, ShieldCheck, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, RefreshCw, ShieldAlert, ShieldCheck, XCircle, Wallet } from "lucide-react";
 import { supabase } from "@/lib/supabase-browser";
 
 type AdminListing = { id:string;seller_id:string;brand:string;country_code:string;currency:string;denomination:number;asking_price:number;card_type:string;description:string;status:string;moderation_note:string|null;created_at:string };
@@ -61,7 +61,7 @@ export default function GiftCardAdminPage(){
    <Link href="/gift-cards" style={{display:"inline-flex",alignItems:"center",gap:8,color:"#475467",textDecoration:"none",marginBottom:18}}><ArrowLeft size={17}/> Marketplace</Link>
    <header style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:20}}>
     <div><h1 style={{margin:0,fontSize:28}}>Marketplace operations</h1><p style={{color:"#667085",margin:"6px 0 0"}}>Seller verification, listing moderation, disputes and order oversight.</p></div>
-    <button onClick={()=>void load()} style={{...action,background:"#fff",border:"1px solid #d0d5dd"}}><RefreshCw size={16}/> Refresh</button>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><Link href="/gift-cards/admin/wallet" style={{...action,background:"#101828",color:"#fff",textDecoration:"none"}}><Wallet size={16}/> Virtual wallet</Link><button onClick={()=>void load()} style={{...action,background:"#fff",border:"1px solid #d0d5dd"}}><RefreshCw size={16}/> Refresh</button></div>
    </header>
    <section style={{...panel,display:"flex",gap:12,alignItems:"start",background:"#fffaeb",borderColor:"#fedf89",marginBottom:18}}>
     <ShieldAlert size={22} color="#b54708"/><div><strong>Restricted administrator area</strong><p style={{margin:"5px 0 0",lineHeight:1.5,color:"#7a2e0e"}}>Only accounts explicitly provisioned in the gift_card_marketplace_admins table can access these operations. Do not add admin privileges through a client form.</p></div>
