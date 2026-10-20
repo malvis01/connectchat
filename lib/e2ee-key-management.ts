@@ -42,7 +42,7 @@ export async function registerE2EEDevice(userId: string) {
     .select("id,device_name,public_key,fingerprint,created_at,last_seen_at,revoked_at")
     .single();
   if (error) throw error;
-  return { ...data, privateKey: keys.privateKey };
+  return { ...data, publicKey: keys.publicKey, privateKey: keys.privateKey };
 }
 
 export async function listContactDevices(userId: string) {
