@@ -484,7 +484,7 @@ export default function ChatPage() {
           <div className="auth-brand" style={{margin:0}}><span className="auth-logo"><MessageCircle size={21}/></span><div><strong>ConnectChat</strong><span>Your ID: {profile?.connectchat_number ?? "Loading…"}</span></div></div>
           <button className="icon-button" title="Rotate encryption key" onClick={() => void rotateMyEncryptionKey()}><UserRound size={19}/></button>
         </div>
-        <div className="search-box"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search people by name, username or phone"/></div>
+        <div className="search-box"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by ConnectChat number, name or username"/></div>
         <div className="people-list">
           {filteredPeople.map((person) => <button key={person.id} className={`person-row ${selected?.id === person.id ? "active" : ""}`} onClick={() => void openChat(person)}>
             <span className="person-avatar">{person.full_name.slice(0,1).toUpperCase()}</span><span className="person-info"><strong>{person.full_name}</strong><small>{person.connectchat_number}{person.username ? ` · @${person.username}` : ""}</small></span>
