@@ -187,7 +187,8 @@ export default function ChatPage() {
     return people.filter((person) =>
       person.full_name.toLowerCase().includes(q) ||
       (person.username ?? "").toLowerCase().includes(q) ||
-      person.phone.toLowerCase().includes(q) ||\n      person.connectchat_number.toLowerCase().includes(q)
+      person.phone.toLowerCase().includes(q) ||
+      person.connectchat_number.toLowerCase().includes(q)
     );
   }, [people, query]);
 
