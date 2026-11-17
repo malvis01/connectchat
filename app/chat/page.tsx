@@ -187,7 +187,7 @@ export default function ChatPage() {
     return people.filter((person) =>
       person.full_name.toLowerCase().includes(q) ||
       (person.username ?? "").toLowerCase().includes(q) ||
-      person.phone.toLowerCase().includes(q)
+      person.phone.toLowerCase().includes(q) ||\n      person.connectchat_number.toLowerCase().includes(q)
     );
   }, [people, query]);
 
@@ -480,13 +480,13 @@ export default function ChatPage() {
     <main className="chat-shell">
       <aside className="chat-sidebar">
         <div className="chat-sidebar-header">
-          <div className="auth-brand" style={{margin:0}}><span className="auth-logo"><MessageCircle size={21}/></span><div><strong>ConnectChat</strong><span>Private chats</span></div></div>
+          <div className="auth-brand" style={{margin:0}}><span className="auth-logo"><MessageCircle size={21}/></span><div><strong>ConnectChat</strong><span>Your ID: {profile?.connectchat_number ?? "Loading…"}</span></div></div>
           <button className="icon-button" title="Rotate encryption key" onClick={() => void rotateMyEncryptionKey()}><UserRound size={19}/></button>
         </div>
         <div className="search-box"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search people by name, username or phone"/></div>
         <div className="people-list">
           {filteredPeople.map((person) => <button key={person.id} className={`person-row ${selected?.id === person.id ? "active" : ""}`} onClick={() => void openChat(person)}>
-            <span className="person-avatar">{person.full_name.slice(0,1).toUpperCase()}</span><span className="person-info"><strong>{person.full_name}</strong><small>{person.username ? `@${person.username}` : person.phone}</small></span>
+            <span className="person-avatar">{person.full_name.slice(0,1).toUpperCase()}</span><span className="person-info"><strong>{person.full_name}</strong><small>{person.connectchat_number}{person.username ? ` · @${person.username}` : ""}</small></span>
             <span className={`presence ${person.id === selected?.id ? (otherOnline ? "online" : "") : (person.is_online ? "online" : "")}`}/>
           </button>)}
           {!filteredPeople.length && <p className="empty-state">No other users yet.</p>}
