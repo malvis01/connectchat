@@ -46,6 +46,16 @@ where connectchat_number is null;
 create unique index if not exists profiles_connectchat_number_uidx
   on public.profiles(connectchat_number);
 
+-- Keep existing password hashes and sessions while changing the synthetic
+-- Auth email to the newly assigned ConnectChat number.
+update auth.users u
+set email = 'p_' || lower(translate(regexp_replace(encode(convert_to(p.connectchat_number, 'UTF8'), 'base64'), '[=\n]', '', 'g'), '+/', '-_')) || '@qgsesjcpmvtykzzsleqx.supabase.co',
+    email_confirmed_at = coalesce(u.email_confirmed_at, now()),
+    updated_at = now()
+from public.profiles p
+where p.id = u.id
+  and p.connectchat_number is not null;
+
 create table if not exists public.e2ee_devices (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
