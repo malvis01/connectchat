@@ -60,8 +60,8 @@ Deno.serve(async (req: Request) => {
 
     if (!phone) return jsonResponse({ error: "Invalid ConnectChat number or password." }, 401);
 
-    // New accounts authenticate with their issued ConnectChat number. Existing
-    // accounts retain phone-based credentials until they migrate.
+    // Phone input is retained as a compatibility alias; all accounts authenticate
+    // against the issued ConnectChat number after the identity migration.
     const profile = await admin.from("profiles").select("connectchat_number").eq("phone", phone).maybeSingle();
     if (profile.error) throw profile.error;
     const authIdentifier = profile.data?.connectchat_number
