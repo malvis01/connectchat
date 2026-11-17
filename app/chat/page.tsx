@@ -121,7 +121,7 @@ export default function ChatPage() {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { window.location.href = "/auth"; return; }
-      const { data: me } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+      const { data: me } = await supabase.from("profiles").select("id,connectchat_number,username,full_name,avatar_url,e2ee_public_key,about,is_online,last_seen_at").eq("id", user.id).maybeSingle();
       if (mounted && me) {
         const keys = await ensureE2EEKeypair();
         if (me.e2ee_public_key !== keys.publicKey) {
@@ -133,7 +133,7 @@ export default function ChatPage() {
         setProfile(me);
         await supabase.from("profiles").update({ is_online: true, last_seen_at: new Date().toISOString() }).eq("id", user.id);
       }
-      const { data: users } = await supabase.from("profiles").select("*").neq("id", user.id).order("full_name");
+      const { data: users } = await supabase.from("profiles").select("id,connectchat_number,username,full_name,avatar_url,e2ee_public_key,about,is_online,last_seen_at").neq("id", user.id).order("full_name");
       if (mounted) setPeople(users ?? []);
     })();
     return () => { mounted = false; };
@@ -144,7 +144,7 @@ export default function ChatPage() {
     const channel = supabase.channel(`user-call:${profile.id}`);
     channel.on("broadcast", { event: "invite" }, async ({ payload }) => {
       if (!payload?.callId || payload.from === profile.id) return;
-      const { data: caller } = await supabase.from("profiles").select("*").eq("id", payload.from).maybeSingle();
+      const { data: caller } = await supabase.from("profiles").select("id,connectchat_number,username,full_name,avatar_url,e2ee_public_key,about,is_online,last_seen_at").eq("id", payload.from).maybeSingle();
       if (!caller) return;
       setSelected(caller);
       setConversationId(payload.conversationId ?? null);
@@ -187,7 +187,6 @@ export default function ChatPage() {
     return people.filter((person) =>
       person.full_name.toLowerCase().includes(q) ||
       (person.username ?? "").toLowerCase().includes(q) ||
-      person.phone.toLowerCase().includes(q) ||
       person.connectchat_number.toLowerCase().includes(q)
     );
   }, [people, query]);
