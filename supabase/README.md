@@ -26,3 +26,19 @@ When the Supabase CLI is available, run the local Supabase stack and use the loc
 ## Security
 
 Never put a service-role/secret key in browser code or commit it to GitHub.
+
+
+## ConnectChat account numbers and device keys
+
+Apply migrations in timestamp order. The identity migration adds a stable `CC-########` number to every profile, migrates existing synthetic Auth emails while retaining password hashes, and creates the E2EE device and trust tables. Existing phone input remains a compatibility alias for login; newly issued ConnectChat numbers are the primary login ID.
+
+Deploy both Edge Functions after applying the migration:
+
+```sh
+supabase functions deploy create-phone-account --no-verify-jwt
+supabase functions deploy login-connectchat-account --no-verify-jwt
+```
+
+The signup flow intentionally does not send an OTP. This means ConnectChat cannot confirm that a registrant controls the phone number they enter. The issued ConnectChat number is the account's public handle and should be shared for contact discovery; the original phone number remains private account data and should not be displayed as the public handle.
+
+The service-role key must remain an Edge Function secret and must never be exposed to the browser. Configure the Edge Function secrets using the Supabase project dashboard or CLI. Enable email/password Auth because the current implementation maps ConnectChat numbers to internal synthetic Auth email identifiers.
