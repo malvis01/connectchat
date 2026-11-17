@@ -2,7 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Profile = {
   id: string;
-  phone: string;
   connectchat_number: string;
   username: string | null;
   full_name: string;
