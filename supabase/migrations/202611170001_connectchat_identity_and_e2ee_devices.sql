@@ -160,3 +160,55 @@ create policy e2ee_device_trust_delete_owner
 on public.e2ee_device_trust for delete
 to authenticated
 using (owner_user_id = (select auth.uid()));
+
+-- A public account handle is stable and must not be editable by clients.
+create or replace function public.prevent_connectchat_number_change()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+begin
+  if old.connectchat_number is not null
+     and new.connectchat_number is distinct from old.connectchat_number then
+    raise exception 'ConnectChat numbers cannot be changed';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_connectchat_number_immutable on public.profiles;
+create trigger profiles_connectchat_number_immutable
+before update of connectchat_number on public.profiles
+for each row execute function public.prevent_connectchat_number_change();
+
+-- A trust record must contain the fingerprint actually published by that device.
+drop policy if exists e2ee_device_trust_insert_owner on public.e2ee_device_trust;
+create policy e2ee_device_trust_insert_owner
+on public.e2ee_device_trust for insert
+to authenticated
+with check (
+  owner_user_id = (select auth.uid())
+  and exists (
+    select 1 from public.e2ee_devices d
+    where d.id = device_id
+      and d.user_id = contact_user_id
+      and d.revoked_at is null
+      and d.fingerprint = e2ee_device_trust.fingerprint
+  )
+);
+
+drop policy if exists e2ee_device_trust_update_owner on public.e2ee_device_trust;
+create policy e2ee_device_trust_update_owner
+on public.e2ee_device_trust for update
+to authenticated
+using (owner_user_id = (select auth.uid()))
+with check (
+  owner_user_id = (select auth.uid())
+  and exists (
+    select 1 from public.e2ee_devices d
+    where d.id = device_id
+      and d.user_id = contact_user_id
+      and d.revoked_at is null
+      and d.fingerprint = e2ee_device_trust.fingerprint
+  )
+);
