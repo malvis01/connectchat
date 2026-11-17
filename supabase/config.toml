@@ -1,4 +1,4 @@
-project_id = "connectchat"
+project_id = "qgsesjcpmvtykzzsleqx"
 
 [functions.create-phone-account]
 verify_jwt = false
