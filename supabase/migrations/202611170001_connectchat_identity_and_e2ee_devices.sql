@@ -212,3 +212,12 @@ with check (
       and d.fingerprint = e2ee_device_trust.fingerprint
   )
 );
+
+
+-- Authenticated users may discover public ConnectChat profiles, but phone numbers
+-- are private account data. Grant column-level reads for only the public fields.
+revoke select on table public.profiles from authenticated;
+grant select (
+  id, connectchat_number, username, full_name, avatar_url,
+  e2ee_public_key, about, is_online, last_seen_at, created_at, updated_at
+) on table public.profiles to authenticated;
