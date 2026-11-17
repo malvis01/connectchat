@@ -4,14 +4,9 @@ This directory contains the database contract for ConnectChat. It is intentional
 
 ## Authentication
 
-ConnectChat uses Supabase Auth with **phone number + password**. SMS confirmation is intentionally disabled for the V1 flow, so ConnectChat does not require Twilio or another SMS provider.
+New users register with their **phone number + password** (no OTP or SMS). ConnectChat then issues a permanent public account number in the form `CC-10000001`. That ConnectChat number is what users share with contacts and use with their password to log in again. The original phone number is retained as private account data; phone-number login remains a compatibility alias.
 
-The production Supabase project must have:
-- Phone provider enabled
-- Phone confirmations disabled
-- Password sign-in enabled
-
-Users should enter phone numbers in E.164 format, for example `+2348012345678`.
+The current implementation maps ConnectChat numbers to internal synthetic email identifiers for Supabase Auth. Enable the **Email** password provider in the dedicated Supabase project. The signup Edge Function creates confirmed synthetic-email users, so no confirmation email or OTP is sent. Do not expose the synthetic email address in the UI.
 
 ## Database
 
