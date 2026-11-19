@@ -1,0 +1,7 @@
+project_id = "qgsesjcpmvtykzzsleqx"
+
+[functions.create-phone-account]
+verify_jwt = false
+
+[functions.login-connectchat-account]
+verify_jwt = false

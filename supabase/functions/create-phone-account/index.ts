@@ -16,17 +16,12 @@ function normalizePhone(value: unknown): string {
   if (phone.startsWith("00")) phone = "+" + phone.slice(2);
   if (/^0\d{10}$/.test(phone)) phone = "+234" + phone.slice(1);
   if (/^234\d{10}$/.test(phone)) phone = "+" + phone;
-  if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-    throw new Error("Enter a valid international phone number.");
-  }
+  if (!/^\+[1-9]\d{7,14}$/.test(phone)) throw new Error("Enter a valid international phone number.");
   return phone;
 }
 
-function syntheticEmail(phone: string): string {
-  const encoded = btoa(phone)
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
+function syntheticEmail(identifier: string): string {
+  const encoded = btoa(identifier).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   return `p_${encoded.toLowerCase()}@qgsesjcpmvtykzzsleqx.supabase.co`;
 }
 
@@ -53,32 +48,34 @@ Deno.serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const secretKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SECRET_KEY");
-    if (!supabaseUrl || !secretKey) {
-      throw new Error("Server authentication configuration is missing.");
-    }
+    if (!supabaseUrl || !secretKey) throw new Error("Server authentication configuration is missing.");
 
     admin = createClient(supabaseUrl, secretKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const email = syntheticEmail(phone);
 
-    stage = "checking existing profile";
+    stage = "checking existing phone number";
     const { data: existingProfile, error: profileLookupError } = await admin
       .from("profiles").select("id").eq("phone", phone).maybeSingle();
     if (profileLookupError) throw profileLookupError;
     if (existingProfile) throw new Error("An account already exists for this phone number.");
 
+    stage = "issuing ConnectChat number";
+    const { data: connectchatNumber, error: numberError } = await admin.rpc("issue_connectchat_number");
+    if (numberError) throw numberError;
+    if (typeof connectchatNumber !== "string" || !/^CC-\d{8}$/.test(connectchatNumber)) {
+      throw new Error("Could not issue a ConnectChat number.");
+    }
+
     stage = "creating auth user";
     const { data: created, error: createError } = await admin.auth.admin.createUser({
-      email,
+      email: syntheticEmail(connectchatNumber),
       email_confirm: true,
       password,
-      user_metadata: { full_name: fullName, username: username || null, phone },
+      user_metadata: { full_name: fullName, username: username || null, phone, connectchat_number: connectchatNumber },
     });
     if (createError) {
-      if (/already|registered|exists/i.test(createError.message)) {
-        throw new Error("An account already exists for this phone number.");
-      }
+      if (/already|registered|exists/i.test(createError.message)) throw new Error("Could not create this account. Please try again.");
       throw createError;
     }
     if (!created.user?.id) throw new Error("Supabase did not return a new user ID.");
@@ -88,12 +85,13 @@ Deno.serve(async (req: Request) => {
     const { error: insertError } = await admin.from("profiles").insert({
       id: createdUserId,
       phone,
+      connectchat_number: connectchatNumber,
       full_name: fullName,
       username: username || null,
     });
     if (insertError) throw insertError;
 
-    return jsonResponse({ ok: true, phone });
+    return jsonResponse({ ok: true, phone, connectchatNumber });
   } catch (error) {
     if (createdUserId && admin) {
       try { await admin.auth.admin.deleteUser(createdUserId); } catch { /* preserve original error */ }
