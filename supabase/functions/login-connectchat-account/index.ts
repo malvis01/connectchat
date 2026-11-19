@@ -13,7 +13,7 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 
 function syntheticEmail(identifier: string): string {
   const encoded = btoa(identifier).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-  return `p_${encoded.toLowerCase()}@qgsesjcpmvtykzzsleqx.supabase.co`;
+  return \`p_\${encoded.toLowerCase()}@qgsesjcpmvtykzzsleqx.supabase.co\`;
 }
 
 Deno.serve(async (req: Request) => {
@@ -24,7 +24,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const identifier = String(body.identifier ?? "").trim().toUpperCase();
     const password = String(body.password ?? "");
-    if (!/^CC-\\d{8}$/.test(identifier) || !password) {
+    if (!/^CC-\d{8}$/.test(identifier) || !password) {
       return jsonResponse({ error: "Enter your ConnectChat number and password." }, 400);
     }
 
